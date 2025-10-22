@@ -1,13 +1,12 @@
-# Import all widgets for direct access from nenotk namespace
-from .widgets.buttonmenu import *
-from .widgets.custom_simpledialog import *
-from .widgets.find_replace_entry import *
-from .widgets.image_zoom import *
-from .widgets.popup_zoom import *
-from .widgets.scrollframe import *
-from .widgets.spelltext import *
-from .widgets.tkmarktext import *
-from .widgets.tooltip import *
+# Import widgets
+from nenotk.widgets import *
 
-# Import utils for direct access (optional, but common helpers)
-from .utils.entry_helper import *
+# Import utils
+
+from nenotk.utils import *
+from nenotk.widgets import *
+
+from nenotk.utils import __all__ as utils_all
+from nenotk.widgets import __all__ as widgets_all
+
+__all__ = utils_all + widgets_all
