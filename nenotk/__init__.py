@@ -9,4 +9,4 @@ from nenotk.widgets import *
 from nenotk.utils import __all__ as utils_all
 from nenotk.widgets import __all__ as widgets_all
 
-__all__ = utils_all + widgets_all
+__all__ = ["utils", "widgets"] + utils_all + widgets_all
