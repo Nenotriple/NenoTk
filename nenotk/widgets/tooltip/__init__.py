@@ -37,6 +37,8 @@ from typing import Optional, Tuple, Any, Callable, Dict, Union
 from .position_utils import calculate_tooltip_position, adjust_position_for_screen_bounds, resolve_tooltip_anchor_offsets
 from .animation_utils import animate_tip_window
 
+__all__ = ["ToolTip"]
+
 
 #endregion
 #region ToolTip

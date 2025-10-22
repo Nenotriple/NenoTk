@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk
 
 # nenotk
-from nenotk.widgets import tooltip as Tip
+from nenotk.widgets.tooltip import ToolTip as Tip
 from nenotk.utils import entry_helper as EntryHelper
 
 # Typing
