@@ -1,0 +1,45 @@
+{
+    "configurations": [
+        {
+            "name": "Run Python module",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nenotk.widgets.${input:pickModule}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Run Python module",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "nenotk.widgets.${input:pickModule}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "pickModule",
+            "type": "pickString",
+            "description": "Choose a module to run",
+            "options": [
+                "buttonmenu.__init__",
+                "custom_simpledialog.__init__",
+                "find_replace_entry.__init__",
+                "image_zoom.__init__",
+                "popup_zoom.__init__",
+                "scrollframe.__init__",
+
+                "tkmarktext.demo",
+                "tooltip.demo"
+            ],
+            "default": "buttonmenu.__init__"
+        }
+    ]
+}
