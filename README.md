@@ -2,20 +2,16 @@
 
 NenoTk provides a suite of drop-in replacement and enhancement widgets for Python's tkinter GUI framework.
 
+Designed to be simple to implement, blend in with existing ttk styles, extend functionality, and improve user experience.
+
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
 - [Installation](#installation)
-- [Available Widgets](#available-widgets)
+- [Available Modules](#available-modules)
 - [Project Structure](#project-structure)
-
-## Overview
-
-- **Ease of use:** Simple, intuitive APIs that extend familiar tkinter patterns
-- **Interactive demos:** Every widget includes working example code
 
 ## Installation
 
@@ -40,7 +36,7 @@ pip install -e .
 ```python
 import tkinter as tk
 import nenotk as ntk
-from nenotk.widgets.tooltip import ToolTip as Tip
+from nenotk/widgets/tooltip import ToolTip as Tip
 
 root = tk.Tk()
 
@@ -56,43 +52,51 @@ for i in range(20):
     tk.Label(scrollframe.frame, text=f"Item {i+1}").pack()
 
 # ButtonMenu
-menu_items = ["1", "2", "3"]
-ntk.ButtonMenu(root, text="Choose", menu_items=menu_items).pack()
+bmenu = ntk.ButtonMenu(root, text="Choose",).pack()
+bmenu.menu.add_command(label="Option 1", ...)
+bmenu.menu.add_separator()
+bmenu.menu.add_checkbutton(label="Toggle", ...)
 
 root.mainloop()
 ```
 
-## Available Widgets
+*See individual [widgets](nenotk/widgets)/[utils](nenotk/utils) docs and demos for more info and examples.*
 
-- **ButtonMenu:**
+## Available Modules
+
+### Available Widgets
+
+- [ButtonMenu](nenotk/widgets/buttonmenu/__init__.py)
   - A button that displays a dropdown menu when clicked.
   - *(Inherits from `ttk.Button`)*
-- **CustomSimpleDialog:**
+- [CustomSimpleDialog](nenotk/widgets/custom_simpledialog/__init__.py)
   - A collection of customizable dialog boxes.
   - *(Inherits from `tk.Toplevel`)*
-- **FindReplaceEntry:**
+- [FindReplaceEntry](nenotk/widgets/find_replace_entry/__init__.py)
   - An Entry widget cluster with built-in find and replace functionality.
   - *(Inherits from `ttk.Frame`)*
-- **ImageZoomWidget:**
+- [ImageZoomWidget](nenotk/widgets/image_zoom/__init__.py)
   - A widget for displaying and zooming images.
   - *(Inherits from `ttk.Frame`)*
-- **PopUpZoom:**
+- [PopUpZoom](nenotk/widgets/popup_zoom/__init__.py)
   - A popup window that allows zooming into content.
   - *(Inherits from `tk.Toplevel`)*
-- **ScrollFrame:**
+- [ScrollFrame](nenotk/widgets/scrollframe/__init__.py)
   - A frame that adds scrollbars automatically when content overflows.
   - *(Inherits from `ttk.Frame` or `ttk.LabelFrame`)*
-- **SpellCheckText:**
+- [SpellCheckText](nenotk/widgets/spelltext/__init__.py)
   - A Text widget with integrated spell-checking capabilities.
   - *(Inherits from `tk.Text`)*
-- **ToolTip:**
+- [ToolTip](nenotk/widgets/tooltip/__init__.py)
   - A widget that displays helpful tooltips when hovering over other widgets.
   - *(Composes using `tk.Toplevel`)*
 
-## Available Utilities
+### Available Utilities
 
-- **entry_helper:** Enhance Entry widget functionality.
-- **window_helper:** For managing window behavior and properties.
+- [entry_helper](nenotk/utils/entry_helper.py)
+  - Enhance Entry widget functionality.
+- [window_helper](nenotk/utils/window_helper.py)
+  - For managing window behavior and properties.
 
 ## Project Structure
 
