@@ -23,14 +23,9 @@ from tkinter import ttk, colorchooser, font as tkfont
 #region Path Setup
 
 
-# Ensure local package is used when running as: python examples/demo.py
-_EXAMPLES_DIR = os.path.abspath(os.path.dirname(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_EXAMPLES_DIR, '..'))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
-
-from TkToolTip import TkToolTip as Tip
+# nenotk
+from nenotk.widgets.tooltip import ToolTip as Tip
+from nenotk.utils import entry_helper
 
 # You can override TkToolTip defaults like this, which will apply to all tooltips that do not explicitly set these options.
 Tip.ANIMATION = "slide"
@@ -212,6 +207,7 @@ def create_arg_entry(args_var, args_frame):
     # Shows the current tooltip arguments and lets user copy them
     args_entry = ttk.Entry(args_frame, textvariable=args_var, state='readonly', width=80)
     args_entry.pack(side='left', fill='x', expand=True, padx=(4, 0))
+    entry_helper.bind_helpers(args_entry)
     # Bind a tooltip to the entry to show the argument string
     args_tooltip = Tip.bind(args_entry, text=args_var.get(), wraplength=600, show_delay=300, hide_delay=5000, padx=8, pady=8)
 
@@ -502,6 +498,7 @@ def create_color_field(parent, label_text: str, color_var: tk.Variable):
     label.pack(side='left')
     entry = ttk.Entry(row_frame, textvariable=color_var, width=10)
     entry.pack(side='left', fill='x', expand=True, padx=(4, 4))
+    entry_helper.bind_helpers(entry)
     swatch = create_color_swatch(row_frame, color_var)
     picker_button = ttk.Button(row_frame, text='…', width=3, command=lambda: pick_color(color_var, label_text))
     picker_button.pack(side='left', padx=(4, 0))

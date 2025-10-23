@@ -19,6 +19,9 @@ See `nenotk/widgets/tkmarktext/README.md` for more details.
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
+# NenoTk
+from nenotk.utils import window_helper
+
 # Typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -584,7 +587,7 @@ class TextWindow(_Mixin, tk.Toplevel):
         )
         self.set_window_icon(icon)
         self.deiconify()
-        self._center_window()
+        window_helper.center_window(self, to='parent')
         self.lift()
 
 
@@ -594,24 +597,6 @@ class TextWindow(_Mixin, tk.Toplevel):
             self.title(title)
         if geometry is not None:
             self.geometry(geometry)
-
-
-    def _center_window(self) -> None:
-        """Center window within master, not exceeding master's size."""
-        if not self.master:
-            return
-        self.update_idletasks()
-        master_x = self.master.winfo_x()
-        master_y = self.master.winfo_y()
-        master_width = self.master.winfo_width()
-        master_height = self.master.winfo_height()
-        win_width = self.winfo_width()
-        win_height = self.winfo_height()
-        target_width = min(win_width, master_width)
-        target_height = min(win_height, master_height)
-        x = master_x + (master_width - target_width) // 2
-        y = master_y + (master_height - target_height) // 2
-        self.geometry(f"{target_width}x{target_height}+{x}+{y}")
 
 
     def close_window(self, event: Optional[Any] = None) -> None:

@@ -51,6 +51,9 @@ import queue
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+# NenoTk
+from nenotk.utils import entry_helper, window_helper
+
 # Typing
 from typing import Optional, Sequence, Union, Callable, Any
 
@@ -149,27 +152,6 @@ def _setup_dialog_window(dialog: tk.Toplevel, parent: Optional[tk.Misc], title: 
         except Exception:
             pass
     dialog.minsize(340, 120)
-
-
-def _center_window_to_parent(window: tk.Toplevel, parent: Optional[tk.Misc]) -> None:
-    window.update_idletasks()
-    w = window.winfo_reqwidth()
-    h = window.winfo_reqheight()
-    try:
-        if parent and parent.winfo_ismapped():
-            px, py = parent.winfo_rootx(), parent.winfo_rooty()
-            pw, ph = parent.winfo_width(), parent.winfo_height()
-            x = px + max(0, (pw - w) // 2)
-            y = py + max(0, (ph - h) // 2)
-        else:
-            sw, sh = window.winfo_screenwidth(), window.winfo_screenheight()
-            x = max(0, (sw - w) // 2)
-            y = max(0, (sh - h) // 3)
-    except Exception:
-        sw, sh = window.winfo_screenwidth(), window.winfo_screenheight()
-        x = max(0, (sw - w) // 2)
-        y = max(0, (sh - h) // 3)
-    window.geometry(f"+{x}+{y}")
 
 
 def _create_container(dialog: tk.Toplevel, prompt: str) -> ttk.Frame:
@@ -285,7 +267,7 @@ class _AskStringDialog(tk.Toplevel):
         _setup_dialog_window(self, parent, title, icon_image)
         container = self._create_dialog_widgets(prompt, detail, initialvalue)
         _create_general_dialog_buttons(self, ok_text, cancel_text, container)
-        self._show_dialog(parent, initialvalue)
+        self._show_dialog(initialvalue)
 
 
     def _create_dialog_widgets(self, prompt: str, detail: Optional[str], initialvalue: Optional[str]) -> ttk.Frame:
@@ -299,13 +281,14 @@ class _AskStringDialog(tk.Toplevel):
         entry_width = max(28, min(60, len(self._var.get()) + 12))
         self.entry = ttk.Entry(container, textvariable=self._var, width=entry_width)
         self.entry.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        entry_helper.bind_helpers(self.entry)
         # Move buttons to next row after entry
         container.rowconfigure(row_index + 1, weight=1)
         return container
 
 
-    def _show_dialog(self, parent: Optional[tk.Misc], initialvalue: Optional[str]) -> None:
-        _center_window_to_parent(self, parent)
+    def _show_dialog(self, initialvalue: Optional[str]) -> None:
+        window_helper.center_window(self, to='parent')
         self.deiconify()
         self.grab_set()
         self.entry.focus_set()
@@ -351,7 +334,7 @@ class _AskComboDialog(tk.Toplevel):
         _setup_dialog_window(self, parent, title, icon_image)
         container = self._create_dialog_widgets(prompt, detail, values)
         _create_general_dialog_buttons(self, ok_text, cancel_text, container)
-        self._show_dialog(parent, initialvalue, values)
+        self._show_dialog(initialvalue, values)
 
 
     def _create_dialog_widgets(self, prompt: str, detail: Optional[str], values: list[str]) -> ttk.Frame:
@@ -371,8 +354,8 @@ class _AskComboDialog(tk.Toplevel):
         return container
 
 
-    def _show_dialog(self, parent: Optional[tk.Misc], initialvalue: Optional[str], values: list[str]) -> None:
-        _center_window_to_parent(self, parent)
+    def _show_dialog(self, initialvalue: Optional[str], values: list[str]) -> None:
+        window_helper.center_window(self, to='parent')
         self.deiconify()
         self.grab_set()
         self.combo.focus_set()
@@ -418,7 +401,7 @@ class _AskRadioDialog(tk.Toplevel):
         _setup_dialog_window(self, parent, title, icon_image)
         container, first_radiobutton = self._create_dialog_widgets(prompt, values)
         _create_general_dialog_buttons(self, ok_text, cancel_text, container)
-        self._show_dialog(parent, initialvalue, first_radiobutton)
+        self._show_dialog(initialvalue, first_radiobutton)
 
 
     def _create_dialog_widgets(self, prompt: str, values: Sequence[ChoiceValue]) -> tuple[ttk.Frame, Optional[ttk.Radiobutton]]:
@@ -453,8 +436,8 @@ class _AskRadioDialog(tk.Toplevel):
         return container, first_radiobutton
 
 
-    def _show_dialog(self, parent: Optional[tk.Misc], initialvalue: Optional[str], first_radiobutton: Optional[ttk.Radiobutton]) -> None:
-        _center_window_to_parent(self, parent)
+    def _show_dialog(self, initialvalue: Optional[str], first_radiobutton: Optional[ttk.Radiobutton]) -> None:
+        window_helper.center_window(self, to='parent')
         self.deiconify()
         self.grab_set()
         if initialvalue is not None and initialvalue in self._choices:
@@ -509,7 +492,7 @@ class _ConfirmDialog(tk.Toplevel):
         if not button_defs:
             raise ValueError("buttons sequence cannot be empty")
         default_widget = self._create_dialog_widgets(container, button_defs, row_index)
-        self._show_dialog(parent, default_widget)
+        self._show_dialog(default_widget)
 
 
     def _create_dialog_widgets(
@@ -541,8 +524,8 @@ class _ConfirmDialog(tk.Toplevel):
         return default_widget
 
 
-    def _show_dialog(self, parent: Optional[tk.Misc], default_widget: Optional[ttk.Button]) -> None:
-        _center_window_to_parent(self, parent)
+    def _show_dialog(self, default_widget: Optional[ttk.Button]) -> None:
+        window_helper.center_window(self, to='parent')
         self.deiconify()
         self.grab_set()
         if default_widget is not None:
@@ -604,7 +587,7 @@ class _ProgressDialog(tk.Toplevel):
         _setup_dialog_window(self, parent, title or "Processing", icon_image)
         self.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
         container = self._create_dialog_widgets(prompt)
-        self._show_dialog(parent)
+        self._show_dialog()
         # Start background thread
         self._thread = threading.Thread(target=self._run_task, daemon=True)
         self._thread.start()
@@ -632,8 +615,8 @@ class _ProgressDialog(tk.Toplevel):
         return container
 
 
-    def _show_dialog(self, parent: Optional[tk.Misc]) -> None:
-        _center_window_to_parent(self, parent)
+    def _show_dialog(self) -> None:
+        window_helper.center_window(self, to='parent')
         self.deiconify()
         self.grab_set()
         self.focus_set()
@@ -786,7 +769,7 @@ class _ConfirmPathDialog(tk.Toplevel):
         row_index += 1
         # Buttons
         self._create_buttons(container, row_index)
-        self._show_dialog(parent)
+        self._show_dialog()
 
 
     def _create_buttons(self, container: ttk.Frame, row_index: int) -> None:
@@ -805,8 +788,8 @@ class _ConfirmPathDialog(tk.Toplevel):
         self._ok_btn = ok_btn
 
 
-    def _show_dialog(self, parent: Optional[tk.Misc]) -> None:
-        _center_window_to_parent(self, parent)
+    def _show_dialog(self) -> None:
+        window_helper.center_window(self, to='parent')
         self.deiconify()
         self.grab_set()
         self._ok_btn.focus_set()

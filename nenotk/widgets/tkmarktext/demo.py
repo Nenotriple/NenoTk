@@ -13,7 +13,8 @@ import tkinter as tk
 from tkinter import ttk
 
 # Import tkmarktext components
-from tkmarktext import TextPanel, TextWindow
+from nenotk.widgets.tkmarktext import TextPanel, TextWindow
+from nenotk.utils import window_helper
 
 
 RICH_TEXT = """# tkmarktext Overview
@@ -94,7 +95,8 @@ class DemoApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("tkmarktext Demo")
-        self._center_window(1280, 720)
+        window_helper.center_window(self.root, to='screen')
+        self.root.geometry("1280x720")
 
         self.windows: dict[str, TextWindow] = {}
         self.dynamic_index = 0
@@ -104,16 +106,6 @@ class DemoApp:
         self._build_static_panels()
         self._build_dynamic_section()
         self._build_window_section()
-
-
-    def _center_window(self, width, height):
-        """Center the window on the screen."""
-        self.root.update_idletasks()
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width // 2) - (width // 2)
-        y = (screen_height // 2) - (height // 2)
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
 
 
     def _build_static_panels(self) -> None:

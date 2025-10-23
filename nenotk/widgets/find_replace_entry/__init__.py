@@ -55,7 +55,7 @@ from tkinter import ttk
 
 # nenotk
 from nenotk.widgets.tooltip import ToolTip as Tip
-from nenotk.utils import entry_helper as EntryHelper
+from nenotk.utils import entry_helper
 
 # Typing
 from typing import Tuple
@@ -280,7 +280,7 @@ class FindReplaceEntry(ttk.Frame):
         self.find_entry.bind("<Shift-Return>", lambda e: self.previous_match())
         self.find_entry.bind("<KeyRelease>", self.perform_search)
         self.find_entry.bind("<Escape>", lambda e: self.hide_widget())
-        EntryHelper.bind_helpers(self.find_entry)
+        entry_helper.bind_helpers(self.find_entry)
         # Options menubutton
         self.options_menubutton = ttk.Menubutton(self, text="☰")
         self.options_menubutton.grid(row=0, column=3)
@@ -318,7 +318,7 @@ class FindReplaceEntry(ttk.Frame):
         self.replace_entry.grid(row=1, column=2, sticky="ew")
         self.replace_entry.grid_remove()
         self.replace_entry.bind("<Control-f>", lambda e: self.hide_widget())
-        EntryHelper.bind_helpers(self.replace_entry)
+        entry_helper.bind_helpers(self.replace_entry)
         # Replace button
         replace_btn = ttk.Button(self, text="Replace", command=self.replace_current)
         replace_btn.grid(row=1, column=3, columnspan=2, sticky="ew")
