@@ -374,16 +374,21 @@ class EventController:
         """On canvas resize: preserve view state, show fast preview, and schedule full render."""
         if not self.widget.image_mgr.has_image():
             return
+        can_w, can_h = self.widget.canvas_ctrl.get_size()
+        # If image is snapped to canvas, maintain the fit
+        if self.widget.image_fits_canvas:
+            self.widget._switch_to_fit_and_preview(can_w, can_h, delay=100)
+            self.widget._call_on_render_done()
+            return
         # Capture view state before resize
         view_state = self.widget._capture_view_state()
-        can_w, can_h = self.widget.canvas_ctrl.get_size()
         # Clamp pan so the image remains visible after resize.
         scale = float(self.widget.image_mgr.scale)
         og_w, og_h = self.widget.image_mgr._orig_image.size
         img_w = og_w * scale
         img_h = og_h * scale
         self.widget.pan_offset_x, self.widget.pan_offset_y = self.widget.canvas_ctrl.clamp_pan(self.widget.pan_offset_x, self.widget.pan_offset_y, img_w, img_h)
-        # If image now fits the canvas, switch to fit mode and preview.
+        # If image now fits the canvas after resize, snap to fit mode
         if img_w <= float(can_w) + 1e-6 and img_h <= float(can_h) + 1e-6:
             self.widget._switch_to_fit_and_preview(can_w, can_h, delay=100)
             self.widget._call_on_render_done()
@@ -436,7 +441,7 @@ class EventController:
             img_w = og_w * s_new
             img_h = og_h * s_new
             self.widget.pan_offset_x, self.widget.pan_offset_y = self.widget.canvas_ctrl.clamp_pan(self.widget.pan_offset_x, self.widget.pan_offset_y, img_w, img_h)
-            self.widget.image_fits_canvas = False
+            self.widget.image_fits_canvas = False  # User manually zoomed, un-snap
         self.widget.image_mgr.scale = s_new
         # Fast preview and schedule full render.
         self.widget._using_preview = self.widget.canvas_ctrl.render_viewport_preview(self.widget.image_mgr, self.widget.pan_offset_x, self.widget.pan_offset_y)
@@ -460,6 +465,8 @@ class EventController:
         dy = event.y - start_y
         self.widget.pan_offset_x = start_off_x + dx
         self.widget.pan_offset_y = start_off_y + dy
+        # User manually panned, un-snap
+        self.widget.image_fits_canvas = False
         # Clamp pan so image cannot be dragged fully out of view.
         can_w, can_h = self.widget.canvas_ctrl.get_size()
         og_w, og_h = self.widget.image_mgr._orig_image.size
@@ -480,7 +487,7 @@ class EventController:
                 self.widget.canvas_ctrl.update_canvas_image(self.widget.image_mgr._tk_image, cx, cy, anchor="center")
 
 
-    def _on_button_release(self, event: tk.Event) -> None:
+    def _on_button_release(self, _event: tk.Event) -> None:
         """End drag, restore cursor, and ensure a full render if necessary."""
         self.widget._drag_start = None
         self.widget.canvas_ctrl.set_cursor("")
@@ -931,7 +938,7 @@ class ImageZoomWidget(tk.Frame):
         if not self.image_mgr.has_image():
             return False
         # Compute fit size (already set by caller in some code paths, but recompute here for safety).
-        fit_scale, new_w, new_h = self.image_mgr.compute_fit_scale_and_size(can_w, can_h)
+        _fit_scale, new_w, new_h = self.image_mgr.compute_fit_scale_and_size(can_w, can_h)
         # Ensure sizes are integers >= 1
         new_w = max(1, int(new_w))
         new_h = max(1, int(new_h))
