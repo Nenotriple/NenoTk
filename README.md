@@ -11,7 +11,21 @@ Designed to be simple to implement, blend in with existing ttk styles, extend fu
 
 Tested on Python 3.10
 
-### Install from Source
+### Pip
+
+```bash
+# In you environment
+pip install git+https://github.com/Nenotriple/NenoTk.git@main
+```
+
+### Requirements File
+
+```bash
+# requirements.txt
+git+https://github.com/Nenotriple/NenoTk.git@main
+```
+
+### Manual
 
 ```bash
 # Clone repo
@@ -32,7 +46,9 @@ import tkinter as tk
 import nenotk as ntk
 from nenotk import ToolTip as Tip
 
+
 root = tk.Tk()
+
 
 # ToolTip
 button = tk.Button(root, text="Go!")
@@ -50,6 +66,7 @@ bmenu = ntk.ButtonMenu(root, text="Choose",).pack()
 bmenu.menu.add_command(label="Option 1", ...)
 bmenu.menu.add_separator()
 bmenu.menu.add_checkbutton(label="Toggle", ...)
+
 
 root.mainloop()
 ```
