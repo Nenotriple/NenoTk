@@ -1,6 +1,7 @@
 from nenotk.widgets.buttonmenu import *
 from nenotk.widgets.custom_simpledialog import *
 from nenotk.widgets.find_replace_entry import *
+from nenotk.widgets.imagegrid import *
 from nenotk.widgets.image_zoom import *
 from nenotk.widgets.popup_zoom import *
 from nenotk.widgets.scrollframe import *
@@ -28,6 +29,9 @@ __all__ = [
     "FindReplaceEntry",
     "TextSearchManager",
 
+    "imagegrid",
+    "ImageGrid",
+
     "image_zoom",
     "ImageZoomWidget",
     "SplitImage",
@@ -49,3 +53,4 @@ __all__ = [
     "tooltip",
     "ToolTip",
     ]
+

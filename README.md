@@ -69,6 +69,9 @@ root.mainloop()
 - [FindReplaceEntry](nenotk/widgets/find_replace_entry/__init__.py)
   - An Entry widget cluster with built-in find and replace functionality.
   - *(Inherits from `ttk.Frame`)*
+- [ImageGrid](nenotk/widgets/imagegrid/__init__.py)
+  - A scrollable thumbnail browser with adjustable sizing and incremental loading.
+  - *(Inherits from `ttk.Frame`)*
 - [ImageZoomWidget](nenotk/widgets/image_zoom/__init__.py)
   - A widget for displaying and zooming images.
   - *(Inherits from `ttk.Frame`)*
@@ -106,6 +109,7 @@ root.mainloop()
     │   │   ├── buttonmenu/           # ButtonMenu
     │   │   ├── custom_simpledialog/  # Dialog collection
     │   │   ├── findreplace/          # FindReplaceEntry
+    │   │   ├── imagegrid/            # ImageGrid
     │   │   ├── imagezoomwidget/      # ImageZoomWidget
     │   │   ├── popupzoom/            # PopUpZoom
     │   │   ├── scrollframe/          # ScrollFrame

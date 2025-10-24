@@ -33,6 +33,7 @@
                 "custom_simpledialog.__init__",
                 "find_replace_entry.__init__",
                 "image_zoom.__init__",
+                "imagegrid.__init__",
                 "popup_zoom.__init__",
                 "scrollframe.__init__",
 
