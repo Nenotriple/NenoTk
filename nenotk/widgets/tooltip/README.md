@@ -1,4 +1,4 @@
-# TkToolTip
+# ToolTip
 
 ![Python 3.10+](https://img.shields.io/badge/git-Python_3.10%2B-green)
 
@@ -18,25 +18,6 @@ Bind tooltips to any widget that inherits from `tkinter.Widget`, including custo
 - Opacity control (0.0–1.0) for translucent tooltips.
 - Respects screen bounds and avoids mouse overlap when positioned from the pointer.
 - Multi-item tooltips: pass `list[str]` to render multiple lines with separators; supports per-item alignment flags.
-
-## Installation
-
-1. Install from the repository:
-
-   ```bash
-   pip install git+https://github.com/Nenotriple/TkToolTip.git@main
-   ```
-
-2. Import in your Python script:
-
-   ```python
-   from TkToolTip import TkToolTip as Tip
-   ```
-
-> [!WARNING]
-> **Breaking change:** `v1.12+` introduces API changes.
-> For legacy support use:
-> `pip install git+https://github.com/Nenotriple/TkToolTip.git@v1.11`
 
 ## Usage
 
@@ -59,7 +40,7 @@ tooltip.config(text="Example!")
 
 ```python
 import tkinter as tk
-from TkToolTip import TkToolTip as Tip
+from nenotk import ToolTip as Tip
 
 root = tk.Tk()
 
@@ -116,7 +97,7 @@ root.mainloop()
 Class-level defaults can be changed before creating tooltips. All subsequently created tooltips inherit the new values unless explicitly overridden.
 
 ```python
-from TkToolTip import TkToolTip as Tip
+from nenotk import ToolTip as Tip
 
 # Set global defaults before creating tooltips
 Tip.SHOW_DELAY = 500
@@ -191,7 +172,3 @@ README.md                    # Documentation
 LICENSE                      # License
 CHANGELOG.md                 # Changelog
 ```
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.

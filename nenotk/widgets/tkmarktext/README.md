@@ -3,8 +3,6 @@
 A simple Python module for displaying formatted or plain text in Tkinter GUIs.
 Provides embeddable panels and pop-up windows with Markdown-like formatting.
 
-![Cover Image](img/tkmarktext_v1_demo_preview.png)
-
 ## Installation
 
 Tested on Python 3.10

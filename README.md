@@ -7,12 +7,6 @@ Designed to be simple to implement, blend in with existing ttk styles, extend fu
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 📋 Table of Contents
-
-- [Installation](#installation)
-- [Available Modules](#available-modules)
-- [Project Structure](#project-structure)
-
 ## Installation
 
 Tested on Python 3.10
@@ -36,7 +30,7 @@ pip install -e .
 ```python
 import tkinter as tk
 import nenotk as ntk
-from nenotk/widgets/tooltip import ToolTip as Tip
+from nenotk import ToolTip as Tip
 
 root = tk.Tk()
 
