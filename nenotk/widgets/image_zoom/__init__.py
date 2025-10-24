@@ -548,6 +548,8 @@ class ImageZoomWidget(tk.Frame):
         self.root = self._find_root()
         # Optional callback after render loop
         self.on_render_done = on_render_done
+        # Track if widget is destroyed
+        self._destroyed = False
 
 
 # --- UI construction / initialization ---
@@ -1011,9 +1013,12 @@ class ImageZoomWidget(tk.Frame):
         self._pending_future = future
 
         def _done_callback(fut, s=seq):
+            # Check if widget is destroyed before scheduling after()
+            if self._destroyed:
+                return
             try:
                 self.after(0, lambda: self._on_background_render_done(fut, s))
-            except tk.TclError:
+            except (tk.TclError, RuntimeError):
                 pass
 
         future.add_done_callback(_done_callback)
@@ -1099,6 +1104,7 @@ class ImageZoomWidget(tk.Frame):
 
     def destroy(self) -> None:
         """Clean up background executor and pending work on destroy."""
+        self._destroyed = True
         self._stop_gif_animation()
         self.unbind_events()
         pending = self._pending_future

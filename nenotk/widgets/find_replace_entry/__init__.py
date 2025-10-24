@@ -67,7 +67,6 @@ from typing import Tuple
 
 class TextSearchManager:
     """Manages text search operations with support for highlighting, navigation, and replacements."""
-
     def __init__(self, text_widget: tk.Text):
         """Initialize with a text widget to operate on."""
         self.text_widget = text_widget

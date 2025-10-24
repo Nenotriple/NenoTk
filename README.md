@@ -89,6 +89,9 @@ root.mainloop()
 - [ImageGrid](nenotk/widgets/imagegrid/__init__.py)
   - A scrollable thumbnail browser with adjustable sizing and incremental loading.
   - *(Inherits from `ttk.Frame`)*
+- [ImageScale](nenotk/widgets/imagescale/__init__.py)
+  - A label-based image widget with live scaling and delayed high-quality redraws.
+  - *(Inherits from `tk.Label`)*
 - [ImageZoomWidget](nenotk/widgets/image_zoom/__init__.py)
   - A widget for displaying and zooming images.
   - *(Inherits from `ttk.Frame`)*
@@ -127,6 +130,7 @@ root.mainloop()
     │   │   ├── custom_simpledialog/  # Dialog collection
     │   │   ├── findreplace/          # FindReplaceEntry
     │   │   ├── imagegrid/            # ImageGrid
+    │   │   ├── imagescale/           # ImageScale
     │   │   ├── imagezoomwidget/      # ImageZoomWidget
     │   │   ├── popupzoom/            # PopUpZoom
     │   │   ├── scrollframe/          # ScrollFrame
