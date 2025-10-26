@@ -57,6 +57,7 @@ class ImageGrid(ttk.Frame):
         self._parent_resize_after_id = None
         self.last_parent_sz = (None, None)
         self._pending_parent_sz = None
+        self._last_column_count = None
         self.initial_selected = None
         self.prev_selected = None
         self.initialized = False
@@ -121,10 +122,8 @@ class ImageGrid(ttk.Frame):
 
 
     def create_scrollframe(self):
-        # Create ScrollFrame with vertical scrolling
         self.scroll_frame = ScrollFrame(self, layout="vertical")
         self.scroll_frame.grid(row=0, column=0, sticky="nsew", padx=(10, 10), pady=(10, 4))
-
         # The canvas_frame is now the .frame attribute of ScrollFrame
         self.canvas_frame = ttk.Frame(self.scroll_frame.frame, padding=(self.padding, self.padding))
         self.canvas_frame.pack(fill="both", expand=True)
@@ -161,13 +160,17 @@ class ImageGrid(ttk.Frame):
 #region Grid Logic
 
 
-    def reload_grid(self, *args):
+    def reload_grid(self, *args, skip_cache_update=False):
         self.clear_frame(self.canvas_frame)
         self.set_size_settings()
         self.update_image_info_label()
-        self.update_cache_and_grid()
+        if skip_cache_update:
+            self.create_image_grid()
+        else:
+            self.update_cache_and_grid()
         self.highlight_thumbnail(self.current_idx)
         self.label_size_value.config(text=str(self.image_size))
+        self._last_column_count = self.columns
 
 
     def update_cache_and_grid(self):
@@ -203,7 +206,9 @@ class ImageGrid(ttk.Frame):
             5: (320, 320, 2)
         }
         self.max_width, self.max_height, self.cols = size_settings.get(self.image_size, (80, 80, 8))
-        self.image_flag = self.create_image_flag()
+        if not hasattr(self, '_last_image_size') or self._last_image_size != self.image_size:
+            self.image_flag = self.create_image_flag()
+            self._last_image_size = self.image_size
         self.cols = self.calculate_columns()
 
 
@@ -214,8 +219,8 @@ class ImageGrid(ttk.Frame):
         available_width = frame_width - (2 * self.padding) - 30  # Account for scrollbar
         thumbnail_width_with_padding = self.max_width + (2 * self.padding)
         columns = max(1, available_width // thumbnail_width_with_padding)
-        self.columns = columns
-        return int(columns)
+        columns = int(columns)
+        return columns
 
 
     def create_image_grid(self):
@@ -335,7 +340,6 @@ class ImageGrid(ttk.Frame):
         if self._raw_images_input is None:
             self.images = []
             return
-
         if isinstance(self._raw_images_input, str):
             if os.path.isdir(self._raw_images_input):
                 self.working_folder = self._raw_images_input
@@ -407,7 +411,6 @@ class ImageGrid(ttk.Frame):
 
     def on_parent_configure(self, event=None):
         try:
-            # Ignore configure events from other widgets
             if self.parent_bind is not None and getattr(event, "widget", None) is not self.parent_bind:
                 return
         except Exception:
@@ -418,16 +421,13 @@ class ImageGrid(ttk.Frame):
             new_size = (event.width, event.height)
         except Exception:
             return
-
-        # Debounce resize events by scheduling handler
         self._pending_parent_sz = new_size
         if self._parent_resize_after_id:
             try:
                 self.after_cancel(self._parent_resize_after_id)
             except Exception:
                 pass
-
-        self._parent_resize_after_id = self.after(80, self._handle_parent_resize)
+        self._parent_resize_after_id = self.after(300, self._handle_parent_resize)
 
 
     def _handle_parent_resize(self):
@@ -440,10 +440,13 @@ class ImageGrid(ttk.Frame):
         self.last_parent_sz = new_size
         if getattr(self, "initialized", False):
             try:
-                self.reload_grid()
+                new_column_count = self.calculate_columns()
+                if new_column_count != self._last_column_count:
+                    self._last_column_count = new_column_count
+                    self.reload_grid(skip_cache_update=True)
             except Exception:
                 try:
-                    self.after_idle(self.reload_grid)
+                    self.after_idle(lambda: self.reload_grid(skip_cache_update=True))
                 except Exception:
                     pass
 
@@ -509,18 +512,15 @@ class ImageGrid(ttk.Frame):
         row, _ = divmod(button_index, self.cols)
         cell_height = self.max_height + 2 * self.padding
         button_y = row * cell_height
-
         # Access the canvas from ScrollFrame
         canvas = self.scroll_frame.canvas
         canvas_height = canvas.winfo_height()
-
         # Get scrollable region
         scrollregion = canvas.cget("scrollregion").split()
         if len(scrollregion) == 4:
             total_height = float(scrollregion[3])
         else:
             return
-
         # Calculate centered position
         center_pos = (button_y + cell_height / 2) - (canvas_height / 2)
         center_pos = max(0, min(center_pos, total_height - canvas_height))
@@ -559,6 +559,3 @@ if __name__ == "__main__":
 
 
 #endregion
-
-
-
