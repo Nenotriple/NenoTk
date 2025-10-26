@@ -86,6 +86,9 @@ root.mainloop()
 - [FindReplaceEntry](nenotk/widgets/find_replace_entry/__init__.py)
   - An Entry widget cluster with built-in find and replace functionality.
   - *(Inherits from `ttk.Frame`)*
+- [FileBrowser](nenotk/widgets/file_browser/__init__.py)
+  - A Treeview-based file navigator with lazy directory loading.
+  - *(Inherits from `ttk.Frame`)*
 - [ImageGrid](nenotk/widgets/imagegrid/__init__.py)
   - A scrollable thumbnail browser with adjustable sizing and incremental loading.
   - *(Inherits from `ttk.Frame`)*

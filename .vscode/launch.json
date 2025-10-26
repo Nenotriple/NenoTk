@@ -31,6 +31,7 @@
             "options": [
                 "buttonmenu.__init__",
                 "custom_simpledialog.__init__",
+                "file_browser.__init__",
                 "find_replace_entry.__init__",
                 "image_zoom.__init__",
                 "imagegrid.__init__",

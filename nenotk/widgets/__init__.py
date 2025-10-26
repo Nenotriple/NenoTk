@@ -1,6 +1,7 @@
 from nenotk.widgets.buttonmenu import *
 from nenotk.widgets.custom_simpledialog import *
 from nenotk.widgets.find_replace_entry import *
+from nenotk.widgets.file_browser import *
 from nenotk.widgets.imagegrid import *
 from nenotk.widgets.image_zoom import *
 from nenotk.widgets.imagescale import *
@@ -26,6 +27,10 @@ __all__ = [
     # find_replace_entry
     "find_replace_entry",
     "FindReplaceEntry", "TextSearchManager",
+
+    # file_browser
+    "file_browser",
+    "FileBrowser",
 
     # imagegrid
     "imagegrid",
