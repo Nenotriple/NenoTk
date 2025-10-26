@@ -57,16 +57,24 @@ class FileBrowser(ttk.Frame):
                  master: tk.Widget,
                  path: Optional[os.PathLike[str] | str] = None,
                  on_open: Optional[Callable[[pathlib.Path], None]] = None,
+                 on_change: Optional[Callable[[], None]] = None,
                  show_cols: Optional[List[str]] = None,
                  name_map: Optional[dict[os.PathLike[str] | str, str]] = None,
                  **kwargs) -> None:
         """Initialize the file browser widget."""
         super().__init__(master, **kwargs)
         self.on_open = on_open
+        self.on_change = on_change
         self._node_paths: dict[str, pathlib.Path] = {}
         self._placeholder_tag = "__placeholder__"
         self._name_map: dict[pathlib.Path, str] = {}
         self._icon_images = self._load_icons()
+
+        # Clipboard state
+        self._clipboard_paths: List[pathlib.Path] = []
+        self._clipboard_mode: Optional[str] = None  # 'cut' or 'copy'
+        self._cut_items: set[str] = set()  # Track visually dimmed items
+
         self._set_name_map(name_map)
         self._build_ui(show_cols)
         self.change_directory(path or pathlib.Path.home())
@@ -115,6 +123,7 @@ class FileBrowser(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         root_node = self._insert_node("", self._root_path, open=True)
         self._expand_node(root_node)
+        self._trigger_change_callback()
 
 
     @property
@@ -127,6 +136,7 @@ class FileBrowser(ttk.Frame):
                 paths.append(path)
         return paths
 
+
     def update_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]], refresh: bool = True) -> None:
         """Update the filename mapping and optionally refresh the tree."""
         self._set_name_map(name_map)
@@ -135,10 +145,12 @@ class FileBrowser(ttk.Frame):
         else:
             self._update_visible_labels()
 
+
     def set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
         """Update the filename mapping without refreshing the tree."""
         self._set_name_map(name_map)
         self._update_visible_labels()
+
 
     def _update_visible_labels(self) -> None:
         """Update the text labels and icons of all existing tree items based on current name map."""
@@ -170,6 +182,9 @@ class FileBrowser(ttk.Frame):
         self.tree.column("size", width=100, minwidth=80, stretch=False)
         self.tree.column("modified", width=160, minwidth=140, stretch=False)
 
+        # Configure tag for cut items
+        self.tree.tag_configure("cut", foreground="gray")
+
         self.tree.grid(row=0, column=0, sticky="nsew")
 
         vscroll = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
@@ -188,6 +203,10 @@ class FileBrowser(ttk.Frame):
         self._menu = tk.Menu(self, tearoff=0)
         self._menu.add_command(label="Open", command=self._menu_open)
         self._menu.add_command(label="Reveal in File Explorer", command=self._menu_reveal)
+        self._menu.add_separator()
+        self._menu.add_command(label="Cut", command=self._menu_cut)
+        self._menu.add_command(label="Copy", command=self._menu_copy)
+        self._menu.add_command(label="Paste", command=self._menu_paste)
         self._menu.add_separator()
         self._menu.add_command(label="Copy Filepath", command=self._menu_copy_filepath)
         self._menu.add_command(label="Copy Filename", command=self._menu_copy_filename)
@@ -250,9 +269,14 @@ class FileBrowser(ttk.Frame):
         state = "normal" if enabled else "disabled"
         self._menu.entryconfig("Open", state=state)
         self._menu.entryconfig("Reveal in File Explorer", state=state)
+        self._menu.entryconfig("Cut", state=state)
+        self._menu.entryconfig("Copy", state=state)
         self._menu.entryconfig("Copy Filepath", state=state)
         self._menu.entryconfig("Copy Filename", state=state)
         self._menu.entryconfig("Delete", state=state)
+        # Paste is enabled if clipboard has items and a valid destination exists
+        paste_state = "normal" if self._clipboard_paths else "disabled"
+        self._menu.entryconfig("Paste", state=paste_state)
 
 
     def _open_with_os(self, path: pathlib.Path) -> None:
@@ -319,6 +343,7 @@ class FileBrowser(ttk.Frame):
             else:
                 path.unlink()
             self.refresh()
+            self._trigger_change_callback()
         except Exception as e:
             messagebox.showerror("Delete Failed", f"Could not delete:\n{e}", parent=self)
 
@@ -353,6 +378,118 @@ class FileBrowser(ttk.Frame):
             pass
 
 
+    def _menu_cut(self) -> None:
+        """Cut selected items to clipboard."""
+        paths = self.selected_paths
+        if not paths:
+            return
+        # Clear previous cut visual state
+        self._clear_cut_visual()
+        self._clipboard_paths = paths
+        self._clipboard_mode = 'cut'
+        # Apply visual feedback to cut items
+        for item_id, path in self._node_paths.items():
+            if path in self._clipboard_paths:
+                current_tags = list(self.tree.item(item_id, "tags"))
+                if "cut" not in current_tags:
+                    current_tags.append("cut")
+                    self.tree.item(item_id, tags=current_tags)
+                    self._cut_items.add(item_id)
+
+
+    def _menu_copy(self) -> None:
+        """Copy selected items to clipboard."""
+        paths = self.selected_paths
+        if not paths:
+            return
+        # Clear previous cut visual state
+        self._clear_cut_visual()
+        self._clipboard_paths = paths
+        self._clipboard_mode = 'copy'
+
+
+    def _menu_paste(self) -> None:
+        """Paste clipboard items to the selected directory."""
+        if not self._clipboard_paths or not self._clipboard_mode:
+            return
+        # Determine destination directory
+        selected = self.selected_paths
+        if selected:
+            dest = selected[0]
+            if not dest.is_dir():
+                dest = dest.parent
+        else:
+            dest = self._root_path
+        if not dest.exists() or not dest.is_dir():
+            messagebox.showerror("Paste Failed", "Invalid destination directory.", parent=self)
+            return
+        errors = []
+        success_count = 0
+        for source_path in self._clipboard_paths:
+            if not source_path.exists():
+                errors.append(f"Source no longer exists: {source_path.name}")
+                continue
+            dest_path = dest / source_path.name
+            # Handle name conflicts
+            if dest_path.exists():
+                base_name = source_path.stem
+                suffix = source_path.suffix
+                counter = 1
+                while dest_path.exists():
+                    new_name = f"{base_name} ({counter}){suffix}"
+                    dest_path = dest / new_name
+                    counter += 1
+            try:
+                if self._clipboard_mode == 'cut':
+                    shutil.move(str(source_path), str(dest_path))
+                else:  # copy
+                    if source_path.is_dir():
+                        shutil.copytree(str(source_path), str(dest_path))
+                    else:
+                        shutil.copy2(str(source_path), str(dest_path))
+                success_count += 1
+            except Exception as e:
+                errors.append(f"{source_path.name}: {str(e)}")
+        # Clear clipboard after cut operation
+        if self._clipboard_mode == 'cut':
+            self._clear_cut_visual()
+            self._clipboard_paths.clear()
+            self._clipboard_mode = None
+        # Refresh the view
+        self.refresh()
+        # Trigger change callback
+        if success_count > 0:
+            self._trigger_change_callback()
+        # Show results
+        if errors:
+            error_msg = f"Pasted {success_count} item(s).\n\nErrors:\n" + "\n".join(errors[:5])
+            if len(errors) > 5:
+                error_msg += f"\n... and {len(errors) - 5} more errors"
+            messagebox.showwarning("Paste Completed with Errors", error_msg, parent=self)
+        elif success_count > 0:
+            messagebox.showinfo("Paste Successful", f"Pasted {success_count} item(s).", parent=self)
+
+
+    def _clear_cut_visual(self) -> None:
+        """Remove cut visual feedback from all items."""
+        for item_id in self._cut_items:
+            try:
+                current_tags = list(self.tree.item(item_id, "tags"))
+                if "cut" in current_tags:
+                    current_tags.remove("cut")
+                    self.tree.item(item_id, tags=current_tags)
+            except tk.TclError:
+                # Item no longer exists
+                pass
+        self._cut_items.clear()
+
+
+    def _trigger_change_callback(self) -> None:
+        """Invoke the on_change callback if set."""
+        if callable(self.on_change):
+            self.on_change()
+
+
 #endregion
 #region Tree Management
 
@@ -364,7 +501,6 @@ class FileBrowser(ttk.Frame):
         icon = self._get_icon_for_path(path)
         item_id = self.tree.insert(parent, "end", text=text, values=values, open=open, image=icon)
         self._node_paths[item_id] = path
-
         if path.is_dir():
             # Insert a placeholder child so the Treeview displays an expand icon.
             self.tree.insert(item_id, "end", text="", values=("", "", ""), tags=(self._placeholder_tag,))
@@ -393,8 +529,8 @@ class FileBrowser(ttk.Frame):
             # Use mapped name if available, else fallback to natural sort key
             mapped = self._get_mapped_name(p)
             if mapped is not None:
-                # Use lowercased mapped name for sorting
-                return (not p.is_dir(), mapped.lower())
+                # Use natural sort key on mapped name for consistency
+                return (not p.is_dir(), FileBrowser._natural_sort_key(mapped.lower()))
             return (not p.is_dir(), FileBrowser._natural_sort_key(p.name))
         entries.sort(key=sort_key)
         return entries
@@ -415,6 +551,7 @@ class FileBrowser(ttk.Frame):
             return drive.rstrip("\\/")
         return name
 
+
     def _get_mapped_name(self, path: pathlib.Path) -> Optional[str]:
         """Return the mapped name for a path if it exists in the name map."""
         # Try exact match first
@@ -429,12 +566,14 @@ class FileBrowser(ttk.Frame):
             pass
         return None
 
+
     def _node_label_with_map(self, path: pathlib.Path) -> str:
         """Return the display label for a path, checking name map first."""
         mapped = self._get_mapped_name(path)
         if mapped is not None:
             return mapped
         return self._node_label(path)
+
 
     def _set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
         """Normalize and store the name mapping dictionary."""
