@@ -32,12 +32,14 @@ root.mainloop()
 
 # Standard
 import os
+import pathlib
+from typing import Optional
 
 # tkinter
 from tkinter import ttk, Frame
 
 # Third-Party
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 # Local
 from nenotk.widgets.scrollframe import ScrollFrame
@@ -50,8 +52,9 @@ __all__ = ["ImageGrid"]
 
 
 class ImageGrid(ttk.Frame):
-    def __init__(self, master: 'Frame', image_files=None, on_reload=None):
+    def __init__(self, master: 'Frame', image_files=None, on_reload=None, name_map=None):
         super().__init__(master)
+        self._name_map = {}
         self.supported_types = (".png", ".webp", ".jpg", ".jpeg", ".jpg_large", ".jfif", ".tif", ".tiff", ".bmp")
         self.cache = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}}
         self._raw_images_input = image_files
@@ -59,7 +62,9 @@ class ImageGrid(ttk.Frame):
         self.last_parent_sz = (None, None)
         self._pending_parent_sz = None
         self._last_column_count = None
+        self.controls_visible = True
         self.initial_selected = None
+        self.set_name_map(name_map)
         self.on_reload = on_reload
         self.prev_selected = None
         self.initialized = False
@@ -70,14 +75,17 @@ class ImageGrid(ttk.Frame):
         self.current_idx = 0
         self.visible = True
         self.images = []
+        self.gradient_overlays = {}  # Cache for gradient overlays by size
 
 
-    def initialize(self, image_files=None):
+    def initialize(self, image_files=None, name_map=None):
         '''Initialize the ImageGrid widget. Must be called before use.'''
         if self.initialized:
             return
         if image_files is not None:
             self._raw_images_input = image_files
+        if name_map is not None:
+            self.set_name_map(name_map)
         self._process_images()
         self.working_folder = self._extract_working_folder()
         # Grid configuration
@@ -133,28 +141,28 @@ class ImageGrid(ttk.Frame):
 
     def create_control_row(self):
         # Main
-        frame = ttk.LabelFrame(self, text="Grid Controls", padding=(10, 6))
-        frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
-        frame.columnconfigure(1, weight=1)
-        frame.columnconfigure(3, weight=1)
+        self.control_row = ttk.LabelFrame(self, text="Grid Controls", padding=(10, 6))
+        self.control_row.grid(row=1, column=0, sticky="ew")
+        self.control_row.columnconfigure(1, weight=1)
+        self.control_row.columnconfigure(3, weight=1)
         # Size
-        self.label_size = ttk.Label(frame, text="Size:")
+        self.label_size = ttk.Label(self.control_row, text="Size:")
         self.label_size.grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self.scale_image_size = ttk.Scale(frame, from_=1, to=5, orient="horizontal")
+        self.scale_image_size = ttk.Scale(self.control_row, from_=1, to=5, orient="horizontal")
         self.scale_image_size.set(self.image_size)
         self.scale_image_size.grid(row=0, column=1, sticky="ew")
         self.scale_image_size.bind("<ButtonRelease-1>", self.on_image_size_changed)
         # Info
-        self.label_size_value = ttk.Label(frame, text=str(self.image_size), width=3)
+        self.label_size_value = ttk.Label(self.control_row, text=str(self.image_size), width=3)
         self.label_size_value.grid(row=0, column=2, padx=(8, 12))
-        self.label_image_info = ttk.Label(frame, width=16, anchor="e")
+        self.label_image_info = ttk.Label(self.control_row, width=16, anchor="e")
         self.label_image_info.grid(row=0, column=3, sticky="e")
         self.scale_image_size.config(command=self.round_scale_input)
         # Load all
-        self.button_load_all = ttk.Button(frame, text="Load All", command=self.load_all_images)
+        self.button_load_all = ttk.Button(self.control_row, text="Load All", command=self.load_all_images)
         self.button_load_all.grid(row=0, column=4, padx=(12, 6))
         # Refresh
-        self.button_refresh = ttk.Button(frame, text="Refresh", command=self.reload_grid)
+        self.button_refresh = ttk.Button(self.control_row, text="Refresh", command=self.reload_grid)
         self.button_refresh.grid(row=0, column=5)
 
 
@@ -219,6 +227,9 @@ class ImageGrid(ttk.Frame):
             self.image_flag = self.create_image_flag()
             self._last_image_size = self.image_size
         self.cols = self.calculate_columns()
+        # Create gradient overlay for this size if needed
+        if self.image_size >= 3 and self.image_size not in self.gradient_overlays:
+            self.gradient_overlays[self.image_size] = self.create_gradient_overlay()
 
 
     def calculate_columns(self):
@@ -264,6 +275,18 @@ class ImageGrid(ttk.Frame):
             self.load_more_button.grid(row=final_row + 1, column=0, columnspan=self.columns, pady=(self.padding * 2), padx=self.padding, sticky="ew")
 
 
+    def toggle_control_row(self, show: bool | None = None):
+        # If show is None, toggle current state; otherwise apply explicit value.
+        if show is None:
+            show = not getattr(self, "controls_visible", True)
+        if show:
+            self.control_row.grid()
+            self.controls_visible = True
+        else:
+            self.control_row.grid_remove()
+            self.controls_visible = False
+
+
 #endregion
 #region Image Loading
 
@@ -294,12 +317,102 @@ class ImageGrid(ttk.Frame):
         return images
 
 
+    def create_gradient_overlay(self):
+        """Create a dark gradient overlay for filename display."""
+        width, height = self.max_width, self.max_height
+        gradient = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(gradient)
+        # Gradient height proportional to thumbnail size
+        gradient_height = int(height * 0.15)
+        for y in range(gradient_height):
+            # Alpha gradient from 200 at bottom to 0 at top (flip direction)
+            alpha = int(200 * (y / gradient_height))
+            draw.rectangle([(0, height - gradient_height + y), (width, height - gradient_height + y + 1)],fill=(0, 0, 0, alpha))
+        return gradient
+
+
+    def _get_mapped_name(self, path) -> Optional[str]:
+        """Return the mapped name for a path if it exists in the name map."""
+        path_obj = pathlib.Path(path)
+        # Try exact match first
+        if path_obj in self._name_map:
+            return self._name_map[path_obj]
+        # Try resolved path
+        try:
+            resolved = path_obj.resolve()
+            if resolved in self._name_map:
+                return self._name_map[resolved]
+        except (OSError, RuntimeError):
+            pass
+        # Try string match
+        if path in self._name_map:
+            return self._name_map[path]
+        return None
+
+
+    def set_name_map(self, name_map) -> None:
+        """Normalize and store the name mapping dictionary."""
+        self._name_map.clear()
+        if name_map:
+            for key, value in name_map.items():
+                try:
+                    normalized_key = pathlib.Path(key).expanduser().resolve()
+                    self._name_map[normalized_key] = value
+                except (OSError, RuntimeError):
+                    # If resolution fails, store as-is
+                    self._name_map[pathlib.Path(key)] = value
+
+
+    def apply_filename_overlay(self, img, filename):
+        """Apply gradient and filename text to thumbnail."""
+        if self.image_size < 3:
+            return img
+        # Composite gradient
+        overlay_img = img.copy()
+        gradient = self.gradient_overlays.get(self.image_size)
+        if gradient:
+            overlay_img = Image.alpha_composite(overlay_img, gradient)
+        # Draw filename text
+        draw = ImageDraw.Draw(overlay_img)
+        # Get filename - check name_map first
+        mapped_name = self._get_mapped_name(filename)
+        if mapped_name:
+            name = mapped_name
+        else:
+            name = os.path.splitext(os.path.basename(filename))[0]
+        # Font size based on thumbnail size
+        font_size = {3: 14, 4: 16, 5: 20}.get(self.image_size, 12)
+        try:
+            font = ImageFont.truetype("segoeui.ttf", font_size)
+        except:
+            try:
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except:
+                font = ImageFont.load_default()
+        # Truncate text if too long
+        max_chars = {3: 20, 4: 28, 5: 36}.get(self.image_size, 20)
+        if len(name) > max_chars:
+            name = name[:max_chars-3] + "..."
+        # Get text bounding box
+        bbox = draw.textbbox((0, 0), name, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        # Center text horizontally, position near bottom
+        x = (self.max_width - text_width) // 2
+        y = self.max_height - text_height - 8
+        # Draw text with white color
+        draw.text((x, y), name, fill="white", font=font)
+        return overlay_img
+
+
     def create_new_image(self, img_path):
         new_img = Image.new("RGBA", (self.max_width, self.max_height))
         with Image.open(img_path) as img:
             img.thumbnail((self.max_width, self.max_height))
             position = ((self.max_width - img.width) // 2, (self.max_height - img.height) // 2)
             new_img.paste(img, position)
+        # Apply filename overlay for sizes 3, 4, 5
+        new_img = self.apply_filename_overlay(new_img, img_path)
         self.cache[self.image_size][img_path] = new_img
         return new_img
 
@@ -492,7 +605,14 @@ class ImageGrid(ttk.Frame):
         self.prev_selected = button
         with Image.open(img_path) as img:
             img.thumbnail((self.max_width, self.max_height))
-            highlighted_thumbnail = self.apply_highlight(img)
+            # Create base thumbnail
+            base_thumb = Image.new("RGBA", (self.max_width, self.max_height))
+            position = ((self.max_width - img.width) // 2, (self.max_height - img.height) // 2)
+            base_thumb.paste(img, position)
+            # Apply filename overlay
+            base_thumb = self.apply_filename_overlay(base_thumb, img_path)
+            # Apply highlight
+            highlighted_thumbnail = self.apply_highlight(base_thumb)
             bordered_thumb = ImageTk.PhotoImage(highlighted_thumbnail)
             button.configure(image=bordered_thumb, style="Highlighted.TButton")
             button.image = bordered_thumb
