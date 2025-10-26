@@ -12,6 +12,8 @@ Provides a Treeview-based file browser widget for navigating local directories w
     - `.refresh()`: reload contents of the current root directory.
     - `.selected_paths`: list of `pathlib.Path` objects representing the current selection.
     - `.update_name_map(name_map)`: update the filename mapping and refresh the tree.
+    - `.get_expansion_state()`: return a set of expanded node paths for later restoration.
+    - `.set_expansion_state(state)`: restore previously saved expansion state.
 
 ## Notes
 - Directories load lazily when expanded, keeping large trees snappy.
@@ -75,7 +77,7 @@ class FileBrowser(ttk.Frame):
         self._clipboard_mode: Optional[str] = None  # 'cut' or 'copy'
         self._cut_items: set[str] = set()  # Track visually dimmed items
 
-        self._set_name_map(name_map)
+        self.set_name_map(name_map)
         self._build_ui(show_cols)
         self.change_directory(path or pathlib.Path.home())
 
@@ -119,10 +121,14 @@ class FileBrowser(ttk.Frame):
 
     def refresh(self) -> None:
         """Reload the tree for the current root directory."""
+        # Save expansion state before clearing
+        expansion_state = self.get_expansion_state()
         self._node_paths.clear()
         self.tree.delete(*self.tree.get_children())
         root_node = self._insert_node("", self._root_path, open=True)
         self._expand_node(root_node)
+        # Restore expansion state
+        self.set_expansion_state(expansion_state)
         self._trigger_change_callback()
 
 
@@ -139,7 +145,7 @@ class FileBrowser(ttk.Frame):
 
     def update_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]], refresh: bool = True) -> None:
         """Update the filename mapping and optionally refresh the tree."""
-        self._set_name_map(name_map)
+        self.set_name_map(name_map)
         if refresh:
             self.refresh()
         else:
@@ -148,7 +154,7 @@ class FileBrowser(ttk.Frame):
 
     def set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
         """Update the filename mapping without refreshing the tree."""
-        self._set_name_map(name_map)
+        self.set_name_map(name_map)
         self._update_visible_labels()
 
 
@@ -158,6 +164,46 @@ class FileBrowser(ttk.Frame):
             new_label = self._node_label_with_map(path)
             icon = self._get_icon_for_path(path)
             self.tree.item(item_id, text=new_label, image=icon)
+
+
+    def get_expansion_state(self) -> set[pathlib.Path]:
+        """Return a set of paths for all currently expanded nodes."""
+        expanded_paths = set()
+
+        def collect_expanded(item_id: str) -> None:
+            if self.tree.item(item_id, "open"):
+                path = self._node_paths.get(item_id)
+                if path is not None:
+                    expanded_paths.add(path)
+            # Recurse into children
+            for child_id in self.tree.get_children(item_id):
+                collect_expanded(child_id)
+
+        # Start from root items
+        for item_id in self.tree.get_children():
+            collect_expanded(item_id)
+
+        return expanded_paths
+
+
+    def set_expansion_state(self, state: set[pathlib.Path]) -> None:
+        """Restore expansion state from a previously saved set of paths."""
+        if not state:
+            return
+
+        def expand_matching(item_id: str) -> None:
+            path = self._node_paths.get(item_id)
+            if path in state:
+                # Open this node and ensure its children are loaded
+                self.tree.item(item_id, open=True)
+                self._expand_node(item_id)
+                # Recurse into children to restore their state
+                for child_id in self.tree.get_children(item_id):
+                    expand_matching(child_id)
+
+        # Start from root items
+        for item_id in self.tree.get_children():
+            expand_matching(item_id)
 
 
 #endregion
@@ -425,6 +471,8 @@ class FileBrowser(ttk.Frame):
             return
         errors = []
         success_count = 0
+        # Track source -> destination mappings for name_map updates
+        paste_mappings = {}
         for source_path in self._clipboard_paths:
             if not source_path.exists():
                 errors.append(f"Source no longer exists: {source_path.name}")
@@ -448,8 +496,19 @@ class FileBrowser(ttk.Frame):
                     else:
                         shutil.copy2(str(source_path), str(dest_path))
                 success_count += 1
+                paste_mappings[source_path] = dest_path
             except Exception as e:
                 errors.append(f"{source_path.name}: {str(e)}")
+        # Update name_map for pasted items
+        for source_path, dest_path in paste_mappings.items():
+            # If source had a mapped name, apply it to the destination
+            mapped_name = self._get_mapped_name(source_path)
+            if mapped_name is not None:
+                try:
+                    resolved_dest = dest_path.resolve()
+                    self._name_map[resolved_dest] = mapped_name
+                except (OSError, RuntimeError):
+                    self._name_map[dest_path] = mapped_name
         # Clear clipboard after cut operation
         if self._clipboard_mode == 'cut':
             self._clear_cut_visual()
@@ -575,7 +634,7 @@ class FileBrowser(ttk.Frame):
         return self._node_label(path)
 
 
-    def _set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
+    def set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
         """Normalize and store the name mapping dictionary."""
         self._name_map.clear()
         if name_map:
