@@ -3,11 +3,12 @@
 Scrollable thumbnail browser widget for Tkinter with incremental loading, caching, and selection callbacks.
 
 ## API
-- Class: `ImageGrid(master, image_files=None) -> ttk.Frame`
+- Class: `ImageGrid(master, image_files=None, on_reload=None) -> ttk.Frame`
     - `initialize(image_files=None)`: scan the provided directory or iterable and populate thumbnails.
     - `reload_grid()`: rebuild thumbnails for the current `image_size` bucket.
     - `load_images(all_images=False)`: load the next batch or every remaining image.
     - `on_select`: callback attribute receiving `(index, path)` when the selection changes.
+    - `on_reload`: callback attribute receiving `(loaded, total, columns, rows)` when the grid reloads.
 
 ## Notes
 - Supports PNG, JPEG, WebP, TIFF, BMP variants via Pillow image processing.
@@ -49,7 +50,7 @@ __all__ = ["ImageGrid"]
 
 
 class ImageGrid(ttk.Frame):
-    def __init__(self, master: 'Frame', image_files=None):
+    def __init__(self, master: 'Frame', image_files=None, on_reload=None):
         super().__init__(master)
         self.supported_types = (".png", ".webp", ".jpg", ".jpeg", ".jpg_large", ".jfif", ".tif", ".tiff", ".bmp")
         self.cache = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}}
@@ -59,6 +60,7 @@ class ImageGrid(ttk.Frame):
         self._pending_parent_sz = None
         self._last_column_count = None
         self.initial_selected = None
+        self.on_reload = on_reload
         self.prev_selected = None
         self.initialized = False
         self.parent_bind = None
@@ -171,6 +173,13 @@ class ImageGrid(ttk.Frame):
         self.highlight_thumbnail(self.current_idx)
         self.label_size_value.config(text=str(self.image_size))
         self._last_column_count = self.columns
+        self.trigger_on_reload_callback()
+
+
+    def trigger_on_reload_callback(self):
+        if self.on_reload:
+            rows = (len(self.thumbnails) + self.columns - 1) // self.columns if self.columns > 0 else 0
+            self.on_reload(self.loaded, self.total_images, self.columns, rows)
 
 
     def update_cache_and_grid(self):

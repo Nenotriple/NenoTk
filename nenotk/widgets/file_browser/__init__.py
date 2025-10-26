@@ -3,13 +3,15 @@
 Provides a Treeview-based file browser widget for navigating local directories with a responsive UI.
 
 ## API
-- Class: `FileBrowser(master, path=None, on_open=None, show_cols=None, **kwargs) -> ttk.Frame`
+- Class: `FileBrowser(master, path=None, on_open=None, show_cols=None, name_map=None, **kwargs) -> ttk.Frame`
     - `path`: starting directory; defaults to the user's home directory.
     - `on_open`: optional callback invoked with a `pathlib.Path` when a file is activated.
     - `show_cols`: list of column names to display (case-insensitive). Options: "type", "size", "modified". Defaults to all columns.
+    - `name_map`: optional dictionary mapping `pathlib.Path` or string paths to display names. Keys can be absolute or relative paths.
     - `.change_directory(path)`: point the browser to a new root directory.
     - `.refresh()`: reload contents of the current root directory.
     - `.selected_paths`: list of `pathlib.Path` objects representing the current selection.
+    - `.update_name_map(name_map)`: update the filename mapping and refresh the tree.
 
 ## Notes
 - Directories load lazily when expanded, keeping large trees snappy.
@@ -29,11 +31,11 @@ from __future__ import annotations
 
 # Standard
 import os
-import shutil
-import subprocess
-import sys
+import re
 import time
+import shutil
 import pathlib
+import subprocess
 
 # tkinter
 import tkinter as tk
@@ -41,6 +43,8 @@ from tkinter import ttk, messagebox
 
 # typing
 from typing import Callable, Iterable, List, Optional
+
+from PIL import Image, ImageTk  # Add PIL import for image support
 
 
 #endregion
@@ -54,14 +58,40 @@ class FileBrowser(ttk.Frame):
                  path: Optional[os.PathLike[str] | str] = None,
                  on_open: Optional[Callable[[pathlib.Path], None]] = None,
                  show_cols: Optional[List[str]] = None,
+                 name_map: Optional[dict[os.PathLike[str] | str, str]] = None,
                  **kwargs) -> None:
         """Initialize the file browser widget."""
         super().__init__(master, **kwargs)
         self.on_open = on_open
         self._node_paths: dict[str, pathlib.Path] = {}
         self._placeholder_tag = "__placeholder__"
+        self._name_map: dict[pathlib.Path, str] = {}
+        self._icon_images = self._load_icons()
+        self._set_name_map(name_map)
         self._build_ui(show_cols)
         self.change_directory(path or pathlib.Path.home())
+
+
+    def _load_icons(self):
+        """Load icon images from the script directory."""
+        icon_dir = pathlib.Path(__file__).parent
+        icons = {}
+        def load_icon(filename):
+            path = icon_dir / filename
+            if path.exists():
+                img = Image.open(path).resize((18, 18), Image.LANCZOS)
+                return ImageTk.PhotoImage(img)
+            return None
+        icons['dir'] = load_icon('tree_dir_icon.png')
+        icons['doc'] = load_icon('tree_doc_icon.png')
+        return icons
+
+
+    def _get_icon_for_path(self, path: pathlib.Path):
+        """Return the appropriate icon for the given path."""
+        if path.is_dir():
+            return self._icon_images.get('dir')
+        return self._icon_images.get('doc')
 
 
 #endregion
@@ -96,6 +126,26 @@ class FileBrowser(ttk.Frame):
             if path is not None:
                 paths.append(path)
         return paths
+
+    def update_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]], refresh: bool = True) -> None:
+        """Update the filename mapping and optionally refresh the tree."""
+        self._set_name_map(name_map)
+        if refresh:
+            self.refresh()
+        else:
+            self._update_visible_labels()
+
+    def set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
+        """Update the filename mapping without refreshing the tree."""
+        self._set_name_map(name_map)
+        self._update_visible_labels()
+
+    def _update_visible_labels(self) -> None:
+        """Update the text labels and icons of all existing tree items based on current name map."""
+        for item_id, path in self._node_paths.items():
+            new_label = self._node_label_with_map(path)
+            icon = self._get_icon_for_path(path)
+            self.tree.item(item_id, text=new_label, image=icon)
 
 
 #endregion
@@ -138,6 +188,9 @@ class FileBrowser(ttk.Frame):
         self._menu = tk.Menu(self, tearoff=0)
         self._menu.add_command(label="Open", command=self._menu_open)
         self._menu.add_command(label="Reveal in File Explorer", command=self._menu_reveal)
+        self._menu.add_separator()
+        self._menu.add_command(label="Copy Filepath", command=self._menu_copy_filepath)
+        self._menu.add_command(label="Copy Filename", command=self._menu_copy_filename)
         self._menu.add_separator()
         self._menu.add_command(label="Refresh", command=self.refresh)
         self._menu.add_separator()
@@ -197,6 +250,8 @@ class FileBrowser(ttk.Frame):
         state = "normal" if enabled else "disabled"
         self._menu.entryconfig("Open", state=state)
         self._menu.entryconfig("Reveal in File Explorer", state=state)
+        self._menu.entryconfig("Copy Filepath", state=state)
+        self._menu.entryconfig("Copy Filename", state=state)
         self._menu.entryconfig("Delete", state=state)
 
 
@@ -268,15 +323,46 @@ class FileBrowser(ttk.Frame):
             messagebox.showerror("Delete Failed", f"Could not delete:\n{e}", parent=self)
 
 
+    def _menu_copy_filepath(self) -> None:
+        """Copy the full filepath of the selected item to the clipboard."""
+        path = self._get_menu_selected_path()
+        if path is None:
+            return
+        try:
+            filepath_str = str(path.resolve())
+            self.clipboard_clear()
+            self.clipboard_append(filepath_str)
+            self.update()  # Ensure clipboard is updated
+        except Exception:
+            pass
+
+
+    def _menu_copy_filename(self) -> None:
+        """Copy the filename (or mapped name if available) to the clipboard."""
+        path = self._get_menu_selected_path()
+        if path is None:
+            return
+        try:
+            # Use mapped name if available, otherwise use the actual filename
+            mapped = self._get_mapped_name(path)
+            filename = mapped if mapped is not None else path.name
+            self.clipboard_clear()
+            self.clipboard_append(filename)
+            self.update()  # Ensure clipboard is updated
+        except Exception:
+            pass
+
+
 #endregion
 #region Tree Management
 
 
     def _insert_node(self, parent: str, path: pathlib.Path, *, open: bool = False) -> str:
         """Insert an item for the given path and optionally seed lazy loading."""
-        text = self._node_label(path)
+        text = self._node_label_with_map(path)
         values = self._describe_path(path)
-        item_id = self.tree.insert(parent, "end", text=text, values=values, open=open)
+        icon = self._get_icon_for_path(path)
+        item_id = self.tree.insert(parent, "end", text=text, values=values, open=open, image=icon)
         self._node_paths[item_id] = path
 
         if path.is_dir():
@@ -298,12 +384,19 @@ class FileBrowser(ttk.Frame):
 
 
     def _iter_directory(self, path: pathlib.Path) -> Iterable[pathlib.Path]:
-        """Yield directory contents sorted with directories first."""
+        """Yield directory contents sorted with directories first and names in natural order or name_map."""
         try:
             entries = list(path.iterdir())
         except (PermissionError, OSError):
             return []
-        entries.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+        def sort_key(p):
+            # Use mapped name if available, else fallback to natural sort key
+            mapped = self._get_mapped_name(p)
+            if mapped is not None:
+                # Use lowercased mapped name for sorting
+                return (not p.is_dir(), mapped.lower())
+            return (not p.is_dir(), FileBrowser._natural_sort_key(p.name))
+        entries.sort(key=sort_key)
         return entries
 
 
@@ -321,6 +414,39 @@ class FileBrowser(ttk.Frame):
             drive = getattr(path, "drive", "") or str(path)
             return drive.rstrip("\\/")
         return name
+
+    def _get_mapped_name(self, path: pathlib.Path) -> Optional[str]:
+        """Return the mapped name for a path if it exists in the name map."""
+        # Try exact match first
+        if path in self._name_map:
+            return self._name_map[path]
+        # Try resolved path
+        try:
+            resolved = path.resolve()
+            if resolved in self._name_map:
+                return self._name_map[resolved]
+        except (OSError, RuntimeError):
+            pass
+        return None
+
+    def _node_label_with_map(self, path: pathlib.Path) -> str:
+        """Return the display label for a path, checking name map first."""
+        mapped = self._get_mapped_name(path)
+        if mapped is not None:
+            return mapped
+        return self._node_label(path)
+
+    def _set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
+        """Normalize and store the name mapping dictionary."""
+        self._name_map.clear()
+        if name_map:
+            for key, value in name_map.items():
+                try:
+                    normalized_key = pathlib.Path(key).expanduser().resolve()
+                    self._name_map[normalized_key] = value
+                except (OSError, RuntimeError):
+                    # If resolution fails, store as-is
+                    self._name_map[pathlib.Path(key)] = value
 
 
     @staticmethod
@@ -360,6 +486,19 @@ class FileBrowser(ttk.Frame):
         return time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime))
 
 
+    @staticmethod
+    def _natural_sort_key(name: str):
+        """Return a tuple key that sorts numeric parts numerically and text parts case-insensitively."""
+        parts = re.findall(r'\d+|\D+', name.lower())
+        key = []
+        for part in parts:
+            if part.isdigit():
+                key.append(int(part))
+            else:
+                key.append(part)
+        return tuple(key)
+
+
 #endregion
 #region Demo
 
@@ -382,8 +521,14 @@ if __name__ == "__main__":
 
     browser.on_open = handle_open
 
-    # Demo with only Name and Size columns
-    browser2 = FileBrowser(root, path=".", show_cols=["size"])
+    # Demo with filename mapping
+    current_dir = pathlib.Path(".").resolve()
+    name_mapping = {
+        current_dir / "__init__.py": "📄 Widget Init File",
+        current_dir: "🏠 Current Directory",
+    }
+
+    browser2 = FileBrowser(root, path=".", show_cols=["size"], name_map=name_mapping)
     browser2.pack(fill="both", expand=True)
 
     root.mainloop()
