@@ -455,6 +455,18 @@ class ImageGrid(ttk.Frame):
 #region Thumbnail Selection
 
 
+    def get_thumbnail_button(self, identifier):
+        """Get thumbnail button by index or filename."""
+        if isinstance(identifier, int):
+            return self.thumbnails.get(identifier)
+        elif isinstance(identifier, str):
+            # Search by filename or full path
+            for index, img_path in enumerate(self.images):
+                if img_path == identifier or os.path.basename(img_path) == identifier:
+                    return self.thumbnails.get(index)
+        return None
+
+
     def highlight_thumbnail(self, index):
         if self.prev_selected:
             self._reset_thumbnail(self.prev_selected)
