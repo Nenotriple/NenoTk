@@ -3,9 +3,10 @@
 Provides a Treeview-based file browser widget for navigating local directories with a responsive UI.
 
 ## API
-- Class: `FileBrowser(master, path=None, on_open=None, **kwargs) -> ttk.Frame`
+- Class: `FileBrowser(master, path=None, on_open=None, show_cols=None, **kwargs) -> ttk.Frame`
     - `path`: starting directory; defaults to the user's home directory.
     - `on_open`: optional callback invoked with a `pathlib.Path` when a file is activated.
+    - `show_cols`: list of column names to display (case-insensitive). Options: "type", "size", "modified". Defaults to all columns.
     - `.change_directory(path)`: point the browser to a new root directory.
     - `.refresh()`: reload contents of the current root directory.
     - `.selected_paths`: list of `pathlib.Path` objects representing the current selection.
@@ -14,6 +15,7 @@ Provides a Treeview-based file browser widget for navigating local directories w
 - Directories load lazily when expanded, keeping large trees snappy.
 - Double-clicking (or pressing Enter on) a file triggers the `on_open` callback.
 - The widget configures internal geometry management for plug-and-play use inside layouts.
+- The "Name" column is always displayed and cannot be disabled.
 
 ## Example
 - See the demo code at the bottom of this file.
@@ -51,14 +53,14 @@ class FileBrowser(ttk.Frame):
                  master: tk.Widget,
                  path: Optional[os.PathLike[str] | str] = None,
                  on_open: Optional[Callable[[pathlib.Path], None]] = None,
+                 show_cols: Optional[List[str]] = None,
                  **kwargs) -> None:
         """Initialize the file browser widget."""
         super().__init__(master, **kwargs)
         self.on_open = on_open
         self._node_paths: dict[str, pathlib.Path] = {}
         self._placeholder_tag = "__placeholder__"
-
-        self._build_ui()
+        self._build_ui(show_cols)
         self.change_directory(path or pathlib.Path.home())
 
 
@@ -100,21 +102,22 @@ class FileBrowser(ttk.Frame):
 #region UI Setup
 
 
-    def _build_ui(self) -> None:
+    def _build_ui(self, show_cols) -> None:
         """Create child widgets and configure layout."""
+        self.set_visible_columns(show_cols)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        columns = ("type", "size", "modified")
-        self.tree = ttk.Treeview(self, columns=columns, displaycolumns=columns, show="tree headings", selectmode="extended")
+        all_columns = ("type", "size", "modified")
+        self.tree = ttk.Treeview(self, columns=all_columns, displaycolumns=self._visible_cols, show="tree headings", selectmode="extended")
         self.tree.heading("#0", text="Name", anchor="w")
         self.tree.heading("type", text="Type", anchor="w")
-        self.tree.heading("size", text="Size", anchor="e")
+        self.tree.heading("size", text="Size", anchor="w")
         self.tree.heading("modified", text="Modified", anchor="w")
 
         self.tree.column("#0", width=240, minwidth=160, stretch=True)
         self.tree.column("type", width=120, minwidth=80, stretch=False)
-        self.tree.column("size", width=100, minwidth=80, stretch=False, anchor="e")
+        self.tree.column("size", width=100, minwidth=80, stretch=False)
         self.tree.column("modified", width=160, minwidth=140, stretch=False)
 
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -141,6 +144,15 @@ class FileBrowser(ttk.Frame):
         self._menu.add_command(label="Delete", command=self._menu_delete)
 
         self._menu_item_id = None  # Track which item menu is for
+
+
+    def set_visible_columns(self, show_cols):
+        all_cols = ["type", "size", "modified"]
+        if show_cols is None:
+            self._visible_cols = all_cols.copy()
+        else:
+            normalized = [col.lower() for col in show_cols]
+            self._visible_cols = [col for col in all_cols if col in normalized]
 
 
 #endregion
@@ -260,11 +272,7 @@ class FileBrowser(ttk.Frame):
 #region Tree Management
 
 
-    def _insert_node(self,
-                     parent: str,
-                     path: pathlib.Path,
-                     *,
-                     open: bool = False) -> str:
+    def _insert_node(self, parent: str, path: pathlib.Path, *, open: bool = False) -> str:
         """Insert an item for the given path and optionally seed lazy loading."""
         text = self._node_label(path)
         values = self._describe_path(path)
@@ -362,6 +370,10 @@ if __name__ == "__main__":
     from nenotk.widgets.file_browser import FileBrowser
 
     root = tk.Tk()
+    root.title("FileBrowser Demo")
+    root.geometry("800x600")
+
+    # Demo with all columns (default)
     browser = FileBrowser(root, path=".")
     browser.pack(fill="both", expand=True)
 
@@ -369,4 +381,9 @@ if __name__ == "__main__":
         print("Opened:", path)
 
     browser.on_open = handle_open
+
+    # Demo with only Name and Size columns
+    browser2 = FileBrowser(root, path=".", show_cols=["size"])
+    browser2.pack(fill="both", expand=True)
+
     root.mainloop()
