@@ -17,9 +17,11 @@ Provides a Treeview-based file browser widget for navigating local directories w
 
 ## Notes
 - Directories load lazily when expanded, keeping large trees snappy.
-- Double-clicking (or pressing Enter on) a file triggers the `on_open` callback.
+- Double-clicking (or pressing Enter) on a file triggers the `on_open` callback.
 - The widget configures internal geometry management for plug-and-play use inside layouts.
 - The "Name" column is always displayed and cannot be disabled.
+- Right-click context menu includes: Open, Reveal in File Explorer, New Folder, New File, Cut, Copy, Paste, Copy Filepath, Copy Filename, Rename, Refresh, Delete.
+- Name validation enforces Windows filesystem rules (invalid characters, reserved names, etc.).
 
 ## Example
 - See the demo code at the bottom of this file.
@@ -46,7 +48,7 @@ from tkinter import ttk, messagebox
 # typing
 from typing import Callable, Iterable, List, Optional
 
-from PIL import Image, ImageTk  # Add PIL import for image support
+from PIL import Image, ImageTk
 
 
 #endregion
@@ -55,6 +57,15 @@ from PIL import Image, ImageTk  # Add PIL import for image support
 
 class FileBrowser(ttk.Frame):
     """Treeview-backed browser for navigating the filesystem."""
+
+    # Filename validation constants (Windows-specific)
+    INVALID_FILENAME_CHARS = '<>:"/\\|?*'
+    RESERVED_FILENAMES = frozenset({
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+    })
+
     def __init__(self,
                  master: tk.Widget,
                  path: Optional[os.PathLike[str] | str] = None,
@@ -77,7 +88,7 @@ class FileBrowser(ttk.Frame):
         self._clipboard_mode: Optional[str] = None  # 'cut' or 'copy'
         self._cut_items: set[str] = set()  # Track visually dimmed items
 
-        self.set_name_map(name_map)
+        self._set_name_map(name_map)
         self._build_ui(show_cols)
         self.change_directory(path or pathlib.Path.home())
 
@@ -145,17 +156,11 @@ class FileBrowser(ttk.Frame):
 
     def update_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]], refresh: bool = True) -> None:
         """Update the filename mapping and optionally refresh the tree."""
-        self.set_name_map(name_map)
+        self._set_name_map(name_map)
         if refresh:
             self.refresh()
         else:
             self._update_visible_labels()
-
-
-    def set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
-        """Update the filename mapping without refreshing the tree."""
-        self.set_name_map(name_map)
-        self._update_visible_labels()
 
 
     def _update_visible_labels(self) -> None:
@@ -250,12 +255,17 @@ class FileBrowser(ttk.Frame):
         self._menu.add_command(label="Open", command=self._menu_open)
         self._menu.add_command(label="Reveal in File Explorer", command=self._menu_reveal)
         self._menu.add_separator()
+        self._menu.add_command(label="New Folder", command=self._menu_new_folder)
+        self._menu.add_command(label="New File", command=self._menu_new_file)
+        self._menu.add_separator()
         self._menu.add_command(label="Cut", command=self._menu_cut)
         self._menu.add_command(label="Copy", command=self._menu_copy)
         self._menu.add_command(label="Paste", command=self._menu_paste)
         self._menu.add_separator()
         self._menu.add_command(label="Copy Filepath", command=self._menu_copy_filepath)
         self._menu.add_command(label="Copy Filename", command=self._menu_copy_filename)
+        self._menu.add_separator()
+        self._menu.add_command(label="Rename", command=self._menu_rename)
         self._menu.add_separator()
         self._menu.add_command(label="Refresh", command=self.refresh)
         self._menu.add_separator()
@@ -294,20 +304,8 @@ class FileBrowser(ttk.Frame):
         path = self._node_paths.get(item_id)
         if path is None:
             return
-        if path.is_dir():
-            # Toggle directories manually to keep focus in sync.
-            is_open = self.tree.item(item_id, "open")
-            self.tree.item(item_id, open=not is_open)
-            if not is_open:
-                self._expand_node(item_id)
-            return
-        callback = self.on_open
-        if callable(callback):
-            try:
-                callback(path)
-            except Exception:
-                # Suppress callback exceptions to protect the UI loop.
-                pass
+        # Open file/folder with the OS default handler
+        self._open_with_os(path)
 
 
     def _set_menu_item_states(self, enabled: bool) -> None:
@@ -319,10 +317,14 @@ class FileBrowser(ttk.Frame):
         self._menu.entryconfig("Copy", state=state)
         self._menu.entryconfig("Copy Filepath", state=state)
         self._menu.entryconfig("Copy Filename", state=state)
+        self._menu.entryconfig("Rename", state=state)
         self._menu.entryconfig("Delete", state=state)
         # Paste is enabled if clipboard has items and a valid destination exists
         paste_state = "normal" if self._clipboard_paths else "disabled"
         self._menu.entryconfig("Paste", state=paste_state)
+        # New Folder/File are always enabled (create in root or selected directory)
+        self._menu.entryconfig("New Folder", state="normal")
+        self._menu.entryconfig("New File", state="normal")
 
 
     def _open_with_os(self, path: pathlib.Path) -> None:
@@ -375,6 +377,106 @@ class FileBrowser(ttk.Frame):
             pass
 
 
+    def _validate_name(self, name: str, parent_dir: pathlib.Path, operation: str = "Operation") -> Optional[str]:
+        """Validate a filename/folder name. Returns error message or None if valid."""
+        name = name.strip()
+        # Check if name is empty
+        if not name:
+            return "Name cannot be empty."
+        # Check for invalid characters (Windows-specific)
+        if any(char in name for char in self.INVALID_FILENAME_CHARS):
+            return f"Name contains invalid characters: {self.INVALID_FILENAME_CHARS}"
+        # Check for reserved names (Windows)
+        name_without_ext = pathlib.Path(name).stem.upper()
+        if name_without_ext in self.RESERVED_FILENAMES:
+            return f"'{name}' is a reserved system name."
+        # Check if name ends with space or period (Windows restriction)
+        if name.endswith(' ') or name.endswith('.'):
+            return "Name cannot end with a space or period."
+        # Check for duplicate names
+        new_path = parent_dir / name
+        if new_path.exists():
+            return f"An item named '{name}' already exists."
+        return None
+
+
+    def _get_target_directory(self) -> pathlib.Path:
+        """Get the target directory for new item creation based on selection."""
+        selected = self.selected_paths
+        if selected:
+            target = selected[0]
+            if target.is_dir():
+                return target
+            return target.parent
+        return self._root_path
+
+
+    def _generate_unique_name(self, directory: pathlib.Path, base_name: str, extension: str = "") -> str:
+        """Generate a unique filename in the given directory."""
+        new_name = f"{base_name}{extension}"
+        counter = 1
+        while (directory / new_name).exists():
+            new_name = f"{base_name} ({counter}){extension}"
+            counter += 1
+        return new_name
+
+
+    def _create_new_item(self, is_folder: bool) -> None:
+        """Create a new file or folder and start inline rename."""
+        target_dir = self._get_target_directory()
+        if is_folder:
+            base_name, extension = "New Folder", ""
+            item_type = "Folder"
+        else:
+            base_name, extension = "New File", ".txt"
+            item_type = "File"
+        new_name = self._generate_unique_name(target_dir, base_name, extension)
+        new_path = target_dir / new_name
+        try:
+            if is_folder:
+                new_path.mkdir(parents=False, exist_ok=False)
+            else:
+                new_path.touch(exist_ok=False)
+        except Exception as e:
+            messagebox.showerror(f"Create {item_type} Failed", f"Could not create {item_type.lower()}:\n{e}", parent=self)
+            return
+        self._refresh_and_rename_new_item(new_path, target_dir)
+
+
+    def _menu_new_folder(self) -> None:
+        """Create a new folder and start inline rename."""
+        self._create_new_item(is_folder=True)
+
+
+    def _menu_new_file(self) -> None:
+        """Create a new text file and start inline rename."""
+        self._create_new_item(is_folder=False)
+
+
+    def _refresh_and_rename_new_item(self, new_path: pathlib.Path, parent_dir: pathlib.Path) -> None:
+        """Refresh the tree and start inline rename for a newly created item."""
+        # Save expansion state, ensure parent is expanded
+        expansion_state = self.get_expansion_state()
+        expansion_state.add(parent_dir)
+        # Refresh
+        self.refresh()
+        self.set_expansion_state(expansion_state)
+        # Find the new item
+        new_item_id = None
+        for item_id, path in self._node_paths.items():
+            if path == new_path:
+                new_item_id = item_id
+                break
+        if new_item_id:
+            # Select and scroll to the new item
+            self.tree.selection_set(new_item_id)
+            self.tree.see(new_item_id)
+            self.tree.focus(new_item_id)
+            # Schedule inline rename after UI updates
+            self.after(50, lambda: self._start_rename(new_item_id))
+        self._trigger_change_callback()
+
+
     def _menu_delete(self) -> None:
         """Delete the selected file/directory with confirmation."""
         path = self._get_menu_selected_path()
@@ -424,34 +526,34 @@ class FileBrowser(ttk.Frame):
             pass
 
 
-    def _menu_cut(self) -> None:
-        """Cut selected items to clipboard."""
+    def _set_clipboard(self, mode: str) -> None:
+        """Set clipboard paths and mode, applying visual feedback for cut operations."""
         paths = self.selected_paths
         if not paths:
             return
-        # Clear previous cut visual state
         self._clear_cut_visual()
         self._clipboard_paths = paths
-        self._clipboard_mode = 'cut'
-        # Apply visual feedback to cut items
-        for item_id, path in self._node_paths.items():
-            if path in self._clipboard_paths:
-                current_tags = list(self.tree.item(item_id, "tags"))
-                if "cut" not in current_tags:
-                    current_tags.append("cut")
-                    self.tree.item(item_id, tags=current_tags)
-                    self._cut_items.add(item_id)
+        self._clipboard_mode = mode
+        if mode == 'cut':
+            # Apply visual feedback to cut items
+            clipboard_set = set(self._clipboard_paths)
+            for item_id, path in self._node_paths.items():
+                if path in clipboard_set:
+                    current_tags = list(self.tree.item(item_id, "tags"))
+                    if "cut" not in current_tags:
+                        current_tags.append("cut")
+                        self.tree.item(item_id, tags=current_tags)
+                        self._cut_items.add(item_id)
+
+
+    def _menu_cut(self) -> None:
+        """Cut selected items to clipboard."""
+        self._set_clipboard('cut')
 
 
     def _menu_copy(self) -> None:
         """Copy selected items to clipboard."""
-        paths = self.selected_paths
-        if not paths:
-            return
-        # Clear previous cut visual state
-        self._clear_cut_visual()
-        self._clipboard_paths = paths
-        self._clipboard_mode = 'copy'
+        self._set_clipboard('copy')
 
 
     def _menu_paste(self) -> None:
@@ -501,14 +603,7 @@ class FileBrowser(ttk.Frame):
                 errors.append(f"{source_path.name}: {str(e)}")
         # Update name_map for pasted items
         for source_path, dest_path in paste_mappings.items():
-            # If source had a mapped name, apply it to the destination
-            mapped_name = self._get_mapped_name(source_path)
-            if mapped_name is not None:
-                try:
-                    resolved_dest = dest_path.resolve()
-                    self._name_map[resolved_dest] = mapped_name
-                except (OSError, RuntimeError):
-                    self._name_map[dest_path] = mapped_name
+            self._update_name_map_entry(source_path, dest_path)
         # Clear clipboard after cut operation
         if self._clipboard_mode == 'cut':
             self._clear_cut_visual()
@@ -541,6 +636,94 @@ class FileBrowser(ttk.Frame):
                 # Item no longer exists
                 pass
         self._cut_items.clear()
+
+
+    def _menu_rename(self) -> None:
+        """Start inline rename for the selected item."""
+        item_id = self._menu_item_id
+        if item_id:
+            self._start_rename(item_id)
+
+
+    def _start_rename(self, item_id: str) -> None:
+        """Start inline rename with a ttk.Entry overlay over the tree item."""
+        path = self._node_paths.get(item_id)
+        if path is None:
+            return
+        # Get the bounding box of the tree item text
+        self.tree.update_idletasks()
+        bbox = self.tree.bbox(item_id, column="#0")
+        if not bbox:
+            # Item not visible, scroll to it and retry
+            self.tree.see(item_id)
+            self.tree.update_idletasks()
+            bbox = self.tree.bbox(item_id, column="#0")
+            if not bbox:
+                return
+        x, y, width, height = bbox
+        # Create the entry widget
+        rename_entry = ttk.Entry(self.tree)
+        current_name = path.name
+        rename_entry.insert(0, current_name)
+        # Position the entry over the item
+        # Add some padding to x to account for icon
+        icon_offset = 24  # Approximate icon width + padding
+        rename_entry.place(x=x + icon_offset, y=y, width=max(width - icon_offset, 150), height=height)
+        rename_entry.focus_set()
+        # Select the filename stem (not extension) for files
+        if path.is_file() and path.suffix:
+            stem_end = len(path.stem)
+            rename_entry.selection_range(0, stem_end)
+            rename_entry.icursor(stem_end)
+        else:
+            rename_entry.selection_range(0, tk.END)
+        # Track whether rename was completed to avoid double processing
+        rename_completed = [False]
+
+        def validate_and_rename(new_name: str) -> bool:
+            """Validate the new name and perform the rename."""
+            new_name = new_name.strip()
+            # No change needed if name is the same
+            if new_name == current_name:
+                return True
+            # Validate the name
+            error = self._validate_name(new_name, path.parent, "Rename")
+            if error:
+                messagebox.showerror("Rename Failed", error, parent=self)
+                return False
+            # Perform the rename
+            new_path = path.parent / new_name
+            try:
+                path.rename(new_path)
+                # Update name_map if the old path had a mapping
+                self._update_name_map_entry(path, new_path)
+                self.refresh()
+                self._trigger_change_callback()
+                return True
+            except Exception as e:
+                messagebox.showerror("Rename Failed", f"Could not rename:\n{e}", parent=self)
+                return False
+
+        def complete_rename(event=None) -> None:
+            """Complete the rename operation."""
+            if rename_completed[0]:
+                return
+            rename_completed[0] = True
+            new_name = rename_entry.get()
+            rename_entry.destroy()
+            validate_and_rename(new_name)
+
+        def cancel_rename(event=None) -> None:
+            """Cancel the rename operation."""
+            if rename_completed[0]:
+                return
+            rename_completed[0] = True
+            rename_entry.destroy()
+
+        # Bind events
+        rename_entry.bind("<Return>", complete_rename)
+        rename_entry.bind("<FocusOut>", complete_rename)
+        rename_entry.bind("<Escape>", cancel_rename)
 
 
     def _trigger_change_callback(self) -> None:
@@ -617,13 +800,8 @@ class FileBrowser(ttk.Frame):
         if path in self._name_map:
             return self._name_map[path]
         # Try resolved path
-        try:
-            resolved = path.resolve()
-            if resolved in self._name_map:
-                return self._name_map[resolved]
-        except (OSError, RuntimeError):
-            pass
-        return None
+        resolved = self._resolve_path_safe(path)
+        return self._name_map.get(resolved)
 
 
     def _node_label_with_map(self, path: pathlib.Path) -> str:
@@ -634,17 +812,33 @@ class FileBrowser(ttk.Frame):
         return self._node_label(path)
 
 
-    def set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
+    def _set_name_map(self, name_map: Optional[dict[os.PathLike[str] | str, str]]) -> None:
         """Normalize and store the name mapping dictionary."""
         self._name_map.clear()
         if name_map:
             for key, value in name_map.items():
-                try:
-                    normalized_key = pathlib.Path(key).expanduser().resolve()
-                    self._name_map[normalized_key] = value
-                except (OSError, RuntimeError):
-                    # If resolution fails, store as-is
-                    self._name_map[pathlib.Path(key)] = value
+                resolved = self._resolve_path_safe(pathlib.Path(key).expanduser())
+                self._name_map[resolved] = value
+
+
+    def _resolve_path_safe(self, path: pathlib.Path) -> pathlib.Path:
+        """Resolve a path safely, returning original path if resolution fails."""
+        try:
+            return path.resolve()
+        except (OSError, RuntimeError):
+            return path
+
+
+    def _update_name_map_entry(self, old_path: pathlib.Path, new_path: pathlib.Path) -> None:
+        """Transfer a name_map entry from old_path to new_path if it exists."""
+        mapped_name = self._get_mapped_name(old_path)
+        if mapped_name is None:
+            return
+        # Remove old mappings
+        self._name_map.pop(old_path, None)
+        self._name_map.pop(self._resolve_path_safe(old_path), None)
+        # Add mapping for new path
+        self._name_map[self._resolve_path_safe(new_path)] = mapped_name
 
 
     @staticmethod
@@ -711,6 +905,7 @@ if __name__ == "__main__":
     root.geometry("800x600")
 
     # Demo with all columns (default)
+    # -------------------------------
     browser = FileBrowser(root, path=".")
     browser.pack(fill="both", expand=True)
 
@@ -719,11 +914,13 @@ if __name__ == "__main__":
 
     browser.on_open = handle_open
 
+
     # Demo with filename mapping
+    # --------------------------
     current_dir = pathlib.Path(".").resolve()
     name_mapping = {
-        current_dir / "__init__.py": "📄 Widget Init File",
-        current_dir: "🏠 Current Directory",
+        current_dir: "🏠 Root",
+        current_dir / "setup.py": "Module Setup",
     }
 
     browser2 = FileBrowser(root, path=".", show_cols=["size"], name_map=name_mapping)
