@@ -3,7 +3,7 @@
 Provides interactive image zoom, pan, and split-view widgets for Tkinter applications.
 
 ## API
-- Class: `ImageZoomWidget(master, on_render_done=None, **kwargs)`
+- Class: `ImageZoomWidget(master, on_render_done=None, on_zoom_change=None, on_pan_change=None, on_error=None, **kwargs)`
     - Embeddable image viewer with zoom, pan, and GIF animation support.
     - Methods:
         - load_image(path: str, keep_view: bool = False) -> None
@@ -11,10 +11,17 @@ Provides interactive image zoom, pan, and split-view widgets for Tkinter applica
         - force_fit_to_canvas() -> None
         - set_pan_and_zoom(scale: float, pan_x: float, pan_y: float) -> None
         - get_pan_and_zoom() -> Tuple[float, float, float]
+        - get_zoom_percent() -> float
+        - set_zoom_percent(percent: float) -> None
         - unload_image() -> None
         - get_image(original: bool = True) -> Optional[PIL.Image]
         - get_visible_image() -> Optional[PIL.Image]
         - destroy() -> None
+    - Callbacks:
+        - on_render_done: Called after each render completes
+        - on_zoom_change: Called with (scale, percent) when zoom level changes
+        - on_pan_change: Called with (pan_x, pan_y) when pan position changes
+        - on_error: Called with (error_type, message) instead of showing messagebox
 - Class: `SplitImage(master=None)`
     - Displays two synchronized ImageZoomWidget panes for side-by-side comparison.
     - Methods:
@@ -25,6 +32,7 @@ Provides interactive image zoom, pan, and split-view widgets for Tkinter applica
 ## Notes
 - Supports GIF animation playback (disables pan/zoom events during playback).
 - Returns None if no image is loaded or visible region is empty.
+- Images without alpha channels are kept as RGB to save memory (~33% less).
 
 ## Example
  ```
@@ -80,9 +88,16 @@ class ImageManager:
 
     # --- Public / lifecycle ---
     def load_image(self, path: str) -> None:
-        """Load image and convert to RGBA for consistent resizing."""
+        """Load image, converting to RGBA only if it has transparency."""
         with Image.open(path) as img:
-            self._orig_image = img.convert("RGBA")
+            # Only convert to RGBA if image has alpha channel, otherwise keep as RGB
+            # This saves ~33% memory for images without transparency
+            if img.mode in ('RGBA', 'LA', 'PA') or (img.mode == 'P' and 'transparency' in img.info):
+                self._orig_image = img.convert("RGBA")
+            elif img.mode != 'RGB':
+                self._orig_image = img.convert("RGB")
+            else:
+                self._orig_image = img.copy()
         self._clear_cache()
 
 
@@ -90,8 +105,14 @@ class ImageManager:
         """Set the manager's original image from a PIL.Image (no file I/O)."""
         if pil_image is None:
             return
-        # Store a consistent RGBA copy and clear any cached resized images / tk refs.
-        self._orig_image = pil_image.convert("RGBA")
+        # Only convert to RGBA if image has alpha channel, otherwise keep as RGB
+        # This saves ~33% memory for images without transparency
+        if pil_image.mode in ('RGBA', 'LA', 'PA') or (pil_image.mode == 'P' and 'transparency' in pil_image.info):
+            self._orig_image = pil_image.convert("RGBA")
+        elif pil_image.mode != 'RGB':
+            self._orig_image = pil_image.convert("RGB")
+        else:
+            self._orig_image = pil_image.copy()
         self._clear_cache()
 
 
@@ -443,6 +464,8 @@ class EventController:
             self.widget.pan_offset_x, self.widget.pan_offset_y = self.widget.canvas_ctrl.clamp_pan(self.widget.pan_offset_x, self.widget.pan_offset_y, img_w, img_h)
             self.widget.image_fits_canvas = False  # User manually zoomed, un-snap
         self.widget.image_mgr.scale = s_new
+        # Notify zoom change
+        self.widget._call_on_zoom_change()
         # Fast preview and schedule full render.
         self.widget._using_preview = self.widget.canvas_ctrl.render_viewport_preview(self.widget.image_mgr, self.widget.pan_offset_x, self.widget.pan_offset_y)
         if self.widget._using_preview:
@@ -474,6 +497,8 @@ class EventController:
         img_w = og_w * scale
         img_h = og_h * scale
         self.widget.pan_offset_x, self.widget.pan_offset_y = self.widget.canvas_ctrl.clamp_pan(self.widget.pan_offset_x, self.widget.pan_offset_y, img_w, img_h)
+        # Notify pan change
+        self.widget._call_on_pan_change()
         if self.widget._using_preview:
             # Render preview while dragging and schedule full render.
             self.widget._using_preview = self.widget.canvas_ctrl.render_viewport_preview(self.widget.image_mgr, self.widget.pan_offset_x, self.widget.pan_offset_y)
@@ -514,8 +539,21 @@ class EventController:
 class ImageZoomWidget(tk.Frame):
     """Embeddable image zoom/pan widget for tkinter."""
     # --- Initialization ---
-    def __init__(self, master: Optional[Any] = None, on_render_done: Optional[Any] = None, **kwargs: Any) -> None:
-        """Initialize state, background executor and UI."""
+    def __init__(self, master: Optional[Any] = None, on_render_done: Optional[Callable[[], None]] = None,
+                 on_zoom_change: Optional[Callable[[float, float], None]] = None,
+                 on_pan_change: Optional[Callable[[float, float], None]] = None,
+                 on_error: Optional[Callable[[str, str], None]] = None,
+                 **kwargs: Any) -> None:
+        """Initialize state, background executor and UI.
+
+        Args:
+            master: Parent widget
+            on_render_done: Callback invoked after each render completes
+            on_zoom_change: Callback invoked with (scale, percent) when zoom changes
+            on_pan_change: Callback invoked with (pan_x, pan_y) when pan changes
+            on_error: Callback invoked with (error_type, message) for errors
+            **kwargs: Additional arguments passed to tk.Frame
+        """
         super().__init__(master, **kwargs)
         self.image_mgr = ImageManager()
         self.canvas_ctrl = CanvasController()
@@ -546,10 +584,15 @@ class ImageZoomWidget(tk.Frame):
         self.drag_x = None
         self.drag_y = None
         self.root = self._find_root()
-        # Optional callback after render loop
+        # Optional callbacks
         self.on_render_done = on_render_done
+        self.on_zoom_change = on_zoom_change
+        self.on_pan_change = on_pan_change
+        self.on_error = on_error
         # Track if widget is destroyed
         self._destroyed = False
+        # Cache fit scale for zoom percent calculations
+        self._fit_scale: float = 1.0
 
 
 # --- UI construction / initialization ---
@@ -715,6 +758,42 @@ class ImageZoomWidget(tk.Frame):
         return float(self.image_mgr.scale), float(self.pan_offset_x), float(self.pan_offset_y)
 
 
+    def get_zoom_percent(self) -> float:
+        """Return current zoom level as a percentage (100 = fit to canvas)."""
+        if not self.image_mgr.has_image() or self._fit_scale <= 0:
+            return 100.0
+        return (float(self.image_mgr.scale) / self._fit_scale) * 100.0
+
+
+    def set_zoom_percent(self, percent: float) -> None:
+        """Set zoom level as a percentage (100 = fit to canvas).
+
+        Args:
+            percent: Zoom percentage, where 100 means fit-to-canvas
+        """
+        if not self.image_mgr.has_image() or self._fit_scale <= 0:
+            return
+        try:
+            new_scale = (float(percent) / 100.0) * self._fit_scale
+        except (TypeError, ValueError):
+            return
+        min_scale = self.canvas_ctrl.compute_min_scale_for_image(self.image_mgr)
+        new_scale = max(min_scale, min(self.image_mgr._max_scale, new_scale))
+        self.image_mgr.scale = new_scale
+        # Clamp pan offsets
+        og_w, og_h = self.image_mgr._orig_image.size
+        img_w = og_w * new_scale
+        img_h = og_h * new_scale
+        self.pan_offset_x, self.pan_offset_y = self.canvas_ctrl.clamp_pan(
+            self.pan_offset_x, self.pan_offset_y, img_w, img_h
+        )
+        # Update fit state
+        can_w, can_h = self.canvas_ctrl.get_size()
+        self.image_fits_canvas = img_w <= float(can_w) + 1e-6 and img_h <= float(can_h) + 1e-6
+        self._render_full_image()
+        self._call_on_zoom_change()
+
+
     def unload_image(self) -> None:
         """Unload image and reset widget state."""
         self._stop_gif_animation()
@@ -810,6 +889,37 @@ class ImageZoomWidget(tk.Frame):
                 pass
 
 
+    def _call_on_zoom_change(self) -> None:
+        """Call the on_zoom_change callback if set."""
+        if callable(self.on_zoom_change):
+            try:
+                scale = float(self.image_mgr.scale)
+                percent = self.get_zoom_percent()
+                self.on_zoom_change(scale, percent)
+            except Exception:
+                pass
+
+
+    def _call_on_pan_change(self) -> None:
+        """Call the on_pan_change callback if set."""
+        if callable(self.on_pan_change):
+            try:
+                self.on_pan_change(float(self.pan_offset_x), float(self.pan_offset_y))
+            except Exception:
+                pass
+
+
+    def _call_on_error(self, error_type: str, message: str) -> None:
+        """Call the on_error callback if set, otherwise show messagebox."""
+        if callable(self.on_error):
+            try:
+                self.on_error(error_type, message)
+            except Exception:
+                pass
+        else:
+            messagebox.showerror(f"Error: {error_type}", message)
+
+
 # --- GIF Animation Support ---
     def _load_gif(self, path: str) -> None:
         """Load and prepare GIF animation."""
@@ -837,7 +947,7 @@ class ImageZoomWidget(tk.Frame):
             # Start animation
             self._play_gif_animation()
         except Exception as e:
-            messagebox.showerror("Error: image_zoom._load_gif()", f"Error loading GIF: {e}")
+            self._call_on_error("_load_gif", f"Error loading GIF: {e}")
             self._is_gif = False
 
 
@@ -897,7 +1007,7 @@ class ImageZoomWidget(tk.Frame):
             self._current_frame_index = 0
             self._play_gif_animation()
         except Exception as e:
-            messagebox.showerror("Error: image_zoom._play_gif_animation()", f"Error playing GIF: {e}")
+            self._call_on_error("_play_gif_animation", f"Error playing GIF: {e}")
 
 
     def _stop_gif_animation(self) -> None:
@@ -924,11 +1034,12 @@ class ImageZoomWidget(tk.Frame):
 
     def _fit_image_to_canvas(self) -> None:
         """Set scale to fit canvas and reset pan offsets."""
-        if not self._do_image_check():
+        if not self.image_mgr.has_image():
             self.image_fits_canvas = False
             return
         fit_scale = self.canvas_ctrl.fit_image_to_canvas(self.image_mgr)
         self.image_mgr.scale = fit_scale
+        self._fit_scale = fit_scale  # Cache for zoom percent calculations
         self.pan_offset_x = 0
         self.pan_offset_y = 0
         self.image_fits_canvas = True
