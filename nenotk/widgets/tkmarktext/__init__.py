@@ -176,8 +176,8 @@ class _Mixin:
                     include_arg = custom_options.get("include_scrollbar", True)
                     self._setup_text_widgets(footer=footer_arg, include_scrollbar=include_arg)
                 if ("text" in custom_options) or ("rich_text" in custom_options):
-                    text = custom_options.get("text", getattr(self, "_current_text", None))
-                    rich_text = custom_options.get("rich_text", getattr(self, "_current_rich_text", True))
+                    text = custom_options.get("text", getattr(self, "current_text", None))
+                    rich_text = custom_options.get("rich_text", getattr(self, "current_rich_text", True))
                     self._update_text(text, rich_text)
         return result
 
@@ -569,8 +569,8 @@ class TextWindow(_Mixin, tk.Toplevel):
         self,
         text: Optional[Union[str, Dict[Any, Any], List[Any], Tuple[Any, ...]]] = None,
         rich_text: bool = True,
-        footer: Optional[Union[str, Callable[[Any], Any]]] = "",
-        include_scrollbar: bool = True,
+        footer: Optional[Union[str, Callable[[Any], Any]]] = None,
+        include_scrollbar: Optional[bool] = None,
         title: Optional[str] = None,
         geometry: Optional[str] = None,
         icon: Optional[Any] = None,
@@ -578,13 +578,18 @@ class TextWindow(_Mixin, tk.Toplevel):
     ) -> None:
         """Show window and update title, geometry, and content."""
         self._update_window(title, geometry)
-        self.configure(
-            text=text,
-            rich_text=rich_text,
-            footer=footer,
-            include_scrollbar=include_scrollbar,
-            **kwargs
-        )
+        # Only pass `text`/`rich_text` to configure when an explicit text
+        # value is provided. Calling `open_window()` with no `text`
+        # should not clear previously-set content (e.g., from constructor).
+        cfg = dict(kwargs)
+        if footer is not None:
+            cfg["footer"] = footer
+        if include_scrollbar is not None:
+            cfg["include_scrollbar"] = include_scrollbar
+        if text is not None:
+            cfg["text"] = text
+            cfg["rich_text"] = rich_text
+        self.configure(**cfg)
         self.set_window_icon(icon)
         self.deiconify()
         window_helper.center_window(self, to='parent')
