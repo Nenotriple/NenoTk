@@ -48,6 +48,7 @@ text.bind("<Control-f>", find_replace.show_widget)
 
 # Standard
 import re
+import bisect
 
 # Tkinter
 import tkinter as tk
@@ -74,6 +75,8 @@ class TextSearchManager:
         self.current_match_index = -1  # Index of the currently selected match
         self.highlight_tag = "search_highlight"
         self.current_tag = "current_match"
+        self._line_starts = []
+        self._prev_match_pos = None  # Track previous match for optimized tag removal
         # Configure tag appearance
         self.text_widget.tag_configure(self.highlight_tag,  background="#FFFF99", selectbackground="#ffc800", selectforeground="black")
         self.text_widget.tag_configure(self.current_tag,    background="#FF9933", selectbackground="#ff6e00", selectforeground="black")
@@ -91,23 +94,37 @@ class TextSearchManager:
         return re.escape(search_term)
 
 
-    def _index_to_line_char(self, text: str, index: int) -> Tuple[int, int]:
-        """Convert a character index to line.char format for tkinter."""
-        lines = text[:index].split('\n')
-        line_num = len(lines)
-        char_num = len(lines[-1])
+    def _build_line_index(self, text: str):
+        """Build a list of cumulative character positions for each line start.
+
+        This is O(n) but only called once per search, enabling O(log n) lookups.
+        """
+        self._line_starts = [0]
+        for i, char in enumerate(text):
+            if char == '\n':
+                self._line_starts.append(i + 1)
+
+
+    def _index_to_line_char(self, char_index: int) -> Tuple[int, int]:
+        """Convert a character index to line.char format for tkinter using O(log n) binary search."""
+        line_num = bisect.bisect_right(self._line_starts, char_index)
+        char_num = char_index - self._line_starts[line_num - 1]
         return line_num, char_num
 
 
     def _highlight_current_match(self):
         """Highlight the current match with a different color."""
-        # Remove current highlight from all matches
-        self.text_widget.tag_remove(self.current_tag, "1.0", "end")
+        # Remove current highlight only from previous position (optimization)
+        if self._prev_match_pos:
+            self.text_widget.tag_remove(self.current_tag, self._prev_match_pos[0], self._prev_match_pos[1])
         # Add current highlight to the selected match
         if 0 <= self.current_match_index < len(self.matches):
             start, end = self.matches[self.current_match_index]
+            self._prev_match_pos = (start, end)
             self.text_widget.tag_add(self.current_tag, start, end)
             self.text_widget.see(start)  # Ensure the match is visible
+        else:
+            self._prev_match_pos = None
 
 
 #endregion
@@ -120,7 +137,38 @@ class TextSearchManager:
         self.matches = []
         if not search_term:
             return 0
+        # Use Tkinter's native search for simple literal searches
+        if not use_regex and not match_whole_word:
+            return self._find_all_native(search_term, case_sensitive)
+        # Fall back to regex for advanced options
+        return self._find_all_regex(search_term, case_sensitive, match_whole_word, use_regex)
+
+
+    def _find_all_native(self, search_term: str, case_sensitive: bool = False) -> int:
+        """Use Tkinter's native search method for fast literal searches."""
+        start_pos = "1.0"
+        nocase = not case_sensitive
+        search_len = len(search_term)
+        while True:
+            pos = self.text_widget.search(search_term, start_pos, stopindex="end", nocase=nocase, exact=True)
+            if not pos:
+                break
+            end_pos = f"{pos}+{search_len}c"
+            self.matches.append((pos, end_pos))
+            self.text_widget.tag_add(self.highlight_tag, pos, end_pos)
+            start_pos = end_pos
+        # Select the first match if found
+        if self.matches:
+            self.current_match_index = 0
+            self._highlight_current_match()
+        return len(self.matches)
+
+
+    def _find_all_regex(self, search_term: str, case_sensitive: bool = False, match_whole_word: bool = False, use_regex: bool = False) -> int:
+        """Use regex for advanced search options (whole word, regex patterns)."""
         text_content = self.text_widget.get("1.0", "end-1c")
+        # Build line index once for O(log n) lookups
+        self._build_line_index(text_content)
         # Prepare regex flags
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -134,9 +182,9 @@ class TextSearchManager:
             for match in re.finditer(pattern, text_content, flags):
                 start_idx = match.start()
                 end_idx = match.end()
-                # Convert character indices to tkinter text indices
-                start_line, start_char = self._index_to_line_char(text_content, start_idx)
-                end_line, end_char = self._index_to_line_char(text_content, end_idx)
+                # Convert character indices to tkinter text indices using O(log n) bisect
+                start_line, start_char = self._index_to_line_char(start_idx)
+                end_line, end_char = self._index_to_line_char(end_idx)
                 start_tk_idx = f"{start_line}.{start_char}"
                 end_tk_idx = f"{end_line}.{end_char}"
                 self.matches.append((start_tk_idx, end_tk_idx))
@@ -173,26 +221,39 @@ class TextSearchManager:
 
     def clear_highlights(self):
         """Clear all search highlights."""
-        self.text_widget.tag_remove(self.highlight_tag, "1.0", "end")
-        self.text_widget.tag_remove(self.current_tag, "1.0", "end")
+        # Only clear tags if there are existing highlights (optimization)
+        if self.matches:
+            self.text_widget.tag_remove(self.highlight_tag, "1.0", "end")
+            self.text_widget.tag_remove(self.current_tag, "1.0", "end")
         self.matches = []
         self.current_match_index = -1
+        self._prev_match_pos = None
 
 
 #endregion
 #region Replacement Operations
 
 
-    def replace_current(self, replacement: str) -> bool:
-        """Replace the currently selected match."""
+    def replace_current(self, replacement: str, search_term: str = None,
+                         case_sensitive: bool = False, match_whole_word: bool = False,
+                         use_regex: bool = False) -> bool:
+        """Replace the currently selected match.
+
+        Args:
+            replacement: The text to replace with
+            search_term: Original search term (needed to re-search after replacement)
+            case_sensitive: Whether search is case sensitive
+            match_whole_word: Whether to match whole words only
+            use_regex: Whether search term is a regex pattern
+        """
         if not self.matches or self.current_match_index < 0:
             return False
         start, end = self.matches[self.current_match_index]
         self.text_widget.delete(start, end)
         self.text_widget.insert(start, replacement)
-        # Re-run the search to update match positions
-        search_term = self.text_widget.get(start, f"{start}+{len(replacement)}c")
-        self.find_all(search_term)
+        # Re-run the search to update match positions if search term provided
+        if search_term:
+            self.find_all(search_term, case_sensitive, match_whole_word, use_regex)
         return True
 
 
@@ -232,7 +293,7 @@ class TextSearchManager:
 
 
 class FindReplaceEntry(ttk.Frame):
-    def __init__(self, parent: tk.Frame, text_widget: tk.Text, *args, **kwargs):
+    def __init__(self, parent: tk.Frame, text_widget: tk.Text, show_replace: bool = True, *args, **kwargs):
         # Initialize the ttk.Frame with parent and any extra options
         super().__init__(parent, *args, **kwargs)
         self.parent: tk.Frame = parent
@@ -241,9 +302,14 @@ class FindReplaceEntry(ttk.Frame):
         # Store text widget reference and create search manager if provided
         self.text_widget = text_widget
         self.search_manager = TextSearchManager(text_widget) if text_widget else None
+        # Debouncing for live search (prevents lag on rapid keystrokes)
+        self._search_after_id = None
+        self._debounce_ms = 150  # milliseconds delay before search
         # Store references to widgets
+        self.show_replace = show_replace
         self.toggle_btn = None
         self.find_entry = None
+        self.find_var = tk.StringVar()
         self.replace_entry = None
         self.replace_row_widgets = []
         self.results_label = None
@@ -267,19 +333,21 @@ class FindReplaceEntry(ttk.Frame):
 
 
     def create_find_row(self):
-        self.toggle_btn = ttk.Button(self, text="˃", width=3, command=self.toggle_replace_row)
-        self.toggle_btn.grid(row=0, column=0, rowspan=2, sticky="ns")
-        Tip.create(widget=self.toggle_btn, text="Toggle replace row", origin='widget', tooltip_anchor='sw', padx=1, pady=-2)
+        if self.show_replace:
+            self.toggle_btn = ttk.Button(self, text="˃", width=3, command=self.toggle_replace_row)
+            self.toggle_btn.grid(row=0, column=0, rowspan=2, sticky="ns")
+            Tip.create(widget=self.toggle_btn, text="Toggle replace row", origin='widget', tooltip_anchor='sw', padx=1, pady=-2)
         # Label
         ttk.Label(self, text="Find:").grid(row=0, column=1, sticky="w")
         # Entry
-        self.find_entry = ttk.Entry(self)
+        self.find_entry = ttk.Entry(self, textvariable=self.find_var)
         self.find_entry.grid(row=0, column=2, sticky="ew")
         self.find_entry.bind("<Return>", lambda e: self.next_match())
         self.find_entry.bind("<Shift-Return>", lambda e: self.previous_match())
-        self.find_entry.bind("<KeyRelease>", self.perform_search)
         self.find_entry.bind("<Escape>", lambda e: self.hide_widget())
         entry_helper.bind_helpers(self.find_entry)
+        # Trace changes to the entry variable for live search (debounced)
+        self.find_var.trace_add("write", self._debounced_search)
         # Options menubutton
         self.options_menubutton = ttk.Menubutton(self, text="☰")
         self.options_menubutton.grid(row=0, column=3)
@@ -316,7 +384,6 @@ class FindReplaceEntry(ttk.Frame):
         self.replace_entry = ttk.Entry(self)
         self.replace_entry.grid(row=1, column=2, sticky="ew")
         self.replace_entry.grid_remove()
-        self.replace_entry.bind("<Control-f>", lambda e: self.hide_widget())
         entry_helper.bind_helpers(self.replace_entry)
         # Replace button
         replace_btn = ttk.Button(self, text="Replace", command=self.replace_current)
@@ -340,7 +407,8 @@ class FindReplaceEntry(ttk.Frame):
         """Toggle the visibility of the replace row"""
         self.replace_row_visible = not self.replace_row_visible
         # Update toggle button appearance
-        self.toggle_btn.config(text="˅" if self.replace_row_visible else "˃")
+        if self.toggle_btn:
+            self.toggle_btn.config(text="˅" if self.replace_row_visible else "˃")
         # Show or hide replace row widgets
         if self.replace_row_visible:
             for widget in self.replace_row_widgets:
@@ -390,6 +458,16 @@ class FindReplaceEntry(ttk.Frame):
 
 #endregion
 #region Search Operations
+
+
+    def _debounced_search(self, *args):
+        """Cancel previous scheduled search and schedule a new one after delay.
+
+        This prevents lag when typing quickly by waiting for a pause in input.
+        """
+        if self._search_after_id:
+            self.after_cancel(self._search_after_id)
+        self._search_after_id = self.after(self._debounce_ms, self.perform_search)
 
 
     def perform_search(self, event=None):
@@ -460,11 +538,14 @@ class FindReplaceEntry(ttk.Frame):
         if not self.search_manager:
             return
         replacement = self.replace_entry.get()
-        success = self.search_manager.replace_current(replacement)
+        search_term = self.find_entry.get()
+        case_sensitive = self.case_sensitive.get()
+        match_whole_word = self.match_whole_word.get()
+        use_regex = self.use_regex.get()
+        success = self.search_manager.replace_current(replacement, search_term, case_sensitive, match_whole_word, use_regex)
         # Update the match count
         if success:
             self.update_results_count(len(self.search_manager.matches))
-            self.perform_search()
 
 
     def replace_all(self):
