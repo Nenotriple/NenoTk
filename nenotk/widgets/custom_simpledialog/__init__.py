@@ -13,12 +13,12 @@ Provides simple, consistent dialogs for string, integer, float, combo, radio, ye
     - Select from a dropdown list; returns selected string or None.
 - `askradio(title, prompt, values, initialvalue=None, parent=None, icon_image=None) -> Optional[str]`
     - Select one option from radio buttons; returns value or None.
-- `askyesno(title, prompt, detail=None, parent=None, icon_image=None) -> bool`
-    - Yes/No dialog; returns True for Yes, False for No or Cancel.
-- `askyesnocancel(title, prompt, detail=None, parent=None, icon_image=None) -> Optional[bool]`
-    - Yes/No/Cancel dialog; returns True, False, or None.
-- `askokcancel(title, prompt, detail=None, parent=None, icon_image=None) -> bool`
-    - OK/Cancel dialog; returns True for OK, False for Cancel.
+- `askyesno(title, prompt, detail=None, parent=None, icon_image=None, yes_text=None, no_text=None) -> bool`
+    - Yes/No dialog; returns True for Yes, False for No or Cancel. Supports custom button text.
+- `askyesnocancel(title, prompt, detail=None, parent=None, icon_image=None, yes_text=None, no_text=None, cancel_text=None) -> Optional[bool]`
+    - Yes/No/Cancel dialog; returns True, False, or None. Supports custom button text.
+- `askokcancel(title, prompt, detail=None, parent=None, icon_image=None, ok_text=None, cancel_text=None) -> bool`
+    - OK/Cancel dialog; returns True for OK, False for Cancel. Supports custom button text.
 - `showinfo(title, prompt, detail=None, parent=None, icon_image=None) -> None`
     - Info dialog with OK button; returns None.
 - `showprogress(title, prompt, task_function, args=(), kwargs=None, max_value=100, parent=None, icon_image=None, auto_close=True) -> Any`
@@ -981,7 +981,9 @@ def askyesno(
     prompt: str,
     detail: Optional[str] = None,
     parent: Optional[tk.Misc] = None,
-    icon_image: Optional["tk.PhotoImage"] = None
+    icon_image: Optional["tk.PhotoImage"] = None,
+    yes_text: Optional[str] = None,
+    no_text: Optional[str] = None
 ) -> bool:
     """Show a yes/no dialog.
 
@@ -991,6 +993,8 @@ def askyesno(
         detail: Optional detail text
         parent: Parent window
         icon_image: Optional window icon
+        yes_text: Custom text for the Yes button (default: "Yes")
+        no_text: Custom text for the No button (default: "No")
 
     Returns:
         True for Yes, False for No or Cancel
@@ -1000,7 +1004,7 @@ def askyesno(
         title=title,
         prompt=prompt,
         detail=detail,
-        buttons=[("Yes", True, True), ("No", False, False)],
+        buttons=[(yes_text or "Yes", True, True), (no_text or "No", False, False)],
         cancel_value=False,
         parent=parent,
         icon_image=icon_image
@@ -1013,7 +1017,10 @@ def askyesnocancel(
     prompt: str,
     detail: Optional[str] = None,
     parent: Optional[tk.Misc] = None,
-    icon_image: Optional["tk.PhotoImage"] = None
+    icon_image: Optional["tk.PhotoImage"] = None,
+    yes_text: Optional[str] = None,
+    no_text: Optional[str] = None,
+    cancel_text: Optional[str] = None
 ) -> Optional[bool]:
     """Show a yes/no/cancel dialog.
 
@@ -1023,6 +1030,9 @@ def askyesnocancel(
         detail: Optional detail text
         parent: Parent window
         icon_image: Optional window icon
+        yes_text: Custom text for the Yes button (default: "Yes")
+        no_text: Custom text for the No button (default: "No")
+        cancel_text: Custom text for the Cancel button (default: "Cancel")
 
     Returns:
         True for Yes, False for No, None for Cancel
@@ -1032,7 +1042,7 @@ def askyesnocancel(
         title=title,
         prompt=prompt,
         detail=detail,
-        buttons=[("Yes", True, True), ("No", False, False), ("Cancel", None, False)],
+        buttons=[(yes_text or "Yes", True, True), (no_text or "No", False, False), (cancel_text or "Cancel", None, False)],
         cancel_value=None,
         parent=parent,
         icon_image=icon_image
@@ -1045,7 +1055,9 @@ def askokcancel(
     prompt: str,
     detail: Optional[str] = None,
     parent: Optional[tk.Misc] = None,
-    icon_image: Optional["tk.PhotoImage"] = None
+    icon_image: Optional["tk.PhotoImage"] = None,
+    ok_text: Optional[str] = None,
+    cancel_text: Optional[str] = None
 ) -> bool:
     """Show an OK/Cancel dialog.
 
@@ -1055,6 +1067,8 @@ def askokcancel(
         detail: Optional detail text
         parent: Parent window
         icon_image: Optional window icon
+        ok_text: Custom text for the OK button (default: "OK")
+        cancel_text: Custom text for the Cancel button (default: "Cancel")
 
     Returns:
         True for OK, False for Cancel
@@ -1064,7 +1078,7 @@ def askokcancel(
         title=title,
         prompt=prompt,
         detail=detail,
-        buttons=[("OK", True, True), ("Cancel", False, False)],
+        buttons=[(ok_text or "OK", True, True), (cancel_text or "Cancel", False, False)],
         cancel_value=False,
         parent=parent,
         icon_image=icon_image
