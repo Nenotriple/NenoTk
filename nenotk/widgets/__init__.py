@@ -20,7 +20,7 @@ __all__ = [
     "custom_simpledialog",
     "askstring", "askinteger", "askfloat",
     "askcombo", "askradio",
-    "askyesno", "askyesnocancel",
+    "askyesno", "askyesnocancel", "askokcancel",
     "showinfo", "showprogress",
     "confirmpath",
 

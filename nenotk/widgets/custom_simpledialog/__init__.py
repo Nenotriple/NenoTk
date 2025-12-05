@@ -17,6 +17,8 @@ Provides simple, consistent dialogs for string, integer, float, combo, radio, ye
     - Yes/No dialog; returns True for Yes, False for No or Cancel.
 - `askyesnocancel(title, prompt, detail=None, parent=None, icon_image=None) -> Optional[bool]`
     - Yes/No/Cancel dialog; returns True, False, or None.
+- `askokcancel(title, prompt, detail=None, parent=None, icon_image=None) -> bool`
+    - OK/Cancel dialog; returns True for OK, False for Cancel.
 - `showinfo(title, prompt, detail=None, parent=None, icon_image=None) -> None`
     - Info dialog with OK button; returns None.
 - `showprogress(title, prompt, task_function, args=(), kwargs=None, max_value=100, parent=None, icon_image=None, auto_close=True) -> Any`
@@ -62,7 +64,7 @@ from typing import Optional, Sequence, Union, Callable, Any
 # region Constants
 
 
-__all__ = ["askstring", "askinteger", "askfloat", "askcombo", "askradio", "askyesno", "askyesnocancel", "showinfo", "showprogress", "confirmpath"]
+__all__ = ["askstring", "askinteger", "askfloat", "askcombo", "askradio", "askyesno", "askyesnocancel", "askokcancel", "showinfo", "showprogress", "confirmpath"]
 ChoiceValue = Union[str, tuple[str, str]]
 
 
@@ -482,6 +484,8 @@ class _ConfirmDialog(tk.Toplevel):
         self._cancel_value = cancel_value
         self._default_value: object = cancel_value
         _setup_dialog_window(self, parent, title, icon_image)
+        # Remove default <Return> binding (from _setup_dialog_window)
+        self.unbind("<Return>")
         container = _create_container(self, prompt)
         row_index = 1
         if detail:
@@ -493,6 +497,9 @@ class _ConfirmDialog(tk.Toplevel):
             raise ValueError("buttons sequence cannot be empty")
         default_widget = self._create_dialog_widgets(container, button_defs, row_index)
         self._show_dialog(default_widget)
+        # Bind <Return> to activate the default button
+        if default_widget is not None:
+            self.bind("<Return>", lambda e: default_widget.invoke())
 
 
     def _create_dialog_widgets(
@@ -1033,6 +1040,38 @@ def askyesnocancel(
     return result if isinstance(result, bool) or result is None else None
 
 
+def askokcancel(
+    title: Optional[str],
+    prompt: str,
+    detail: Optional[str] = None,
+    parent: Optional[tk.Misc] = None,
+    icon_image: Optional["tk.PhotoImage"] = None
+) -> bool:
+    """Show an OK/Cancel dialog.
+
+    Parameters:
+        title: Dialog window title
+        prompt: Text prompt displayed above the buttons
+        detail: Optional detail text
+        parent: Parent window
+        icon_image: Optional window icon
+
+    Returns:
+        True for OK, False for Cancel
+    """
+    result = _run_dialog(
+        _ConfirmDialog,
+        title=title,
+        prompt=prompt,
+        detail=detail,
+        buttons=[("OK", True, True), ("Cancel", False, False)],
+        cancel_value=False,
+        parent=parent,
+        icon_image=icon_image
+    )
+    return bool(result)
+
+
 def showinfo(
     title: Optional[str],
     prompt: str,
@@ -1203,6 +1242,9 @@ if __name__ == "__main__":
     def test_askyesnocancel():
         print("Y/N/C:", askyesnocancel("askyesnocancel", "Save?", "detail"))
 
+    def test_askokcancel():
+        print("OK/Cancel:", askokcancel("askokcancel", "Continue?", "detail"))
+
     def test_showinfo():
         showinfo("showinfo", "Info", "detail")
 
@@ -1230,6 +1272,7 @@ if __name__ == "__main__":
     test_askradio()
     test_askyesno()
     test_askyesnocancel()
+    test_askokcancel()
     test_showinfo()
     test_showprogress()
     test_confirmpath()

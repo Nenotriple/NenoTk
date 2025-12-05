@@ -14,6 +14,9 @@ See `nenotk/widgets/tkmarktext/README.md` for more details.
 """
 #region Imports
 
+# Standard
+import os
+from PIL import Image, ImageTk
 
 # tkinter
 import tkinter as tk
@@ -552,6 +555,14 @@ class TextWindow(_Mixin, tk.Toplevel):
     def set_window_icon(self, icon):
         if icon is not None:
             try:
+                # If icon is a string path, try to load as image using Pillow
+                if isinstance(icon, str):
+                    if os.path.isfile(icon):
+                        img = Image.open(icon)
+                        tk_img = ImageTk.PhotoImage(img)
+                        self.iconphoto(False, tk_img)
+                        return
+                # If icon is already a Tk image object
                 if hasattr(icon, "tk") and hasattr(icon, "width"):
                     self.iconphoto(False, icon)
                 else:
