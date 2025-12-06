@@ -1,5 +1,6 @@
 # Utilities
 from nenotk.utils.entry_helper import *
+from nenotk.utils.string_helper import *
 from nenotk.utils.window_helper import *
 
 # Define __all__
@@ -9,6 +10,9 @@ __all__ = [
     "bind_selection_manager",
     "bind_context_menu",
     "bind_undo_stack",
+
+    "string_helper",
+    "format_number_with_commas",
 
     "window_helper",
     "center_window",

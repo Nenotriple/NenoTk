@@ -4,7 +4,7 @@
             "name": "Run Python module",
             "type": "debugpy",
             "request": "launch",
-            "module": "nenotk.widgets.${input:pickModule}",
+            "module": "nenotk.${input:pickModule}",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "env": {
@@ -15,7 +15,7 @@
             "name": "Run Python module",
             "type": "debugpy",
             "request": "launch",
-            "module": "nenotk.widgets.${input:pickModule}",
+            "module": "nenotk.${input:pickModule}",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "env": {
@@ -29,20 +29,20 @@
             "type": "pickString",
             "description": "Choose a module to run",
             "options": [
-                "buttonmenu.__init__",
-                "custom_simpledialog.__init__",
-                "file_browser.__init__",
-                "find_replace_entry.__init__",
-                "image_zoom.__init__",
-                "imagegrid.__init__",
-                "imagescale.__init__",
-                "popup_zoom.__init__",
-                "scrollframe.__init__",
-
-                "tkmarktext.demo",
-                "tooltip.demo"
+                "widgets.buttonmenu.__init__",
+                "widgets.custom_simpledialog.__init__",
+                "widgets.file_browser.__init__",
+                "widgets.find_replace_entry.__init__",
+                "widgets.image_zoom.__init__",
+                "widgets.imagegrid.__init__",
+                "widgets.imagescale.__init__",
+                "widgets.popup_zoom.__init__",
+                "widgets.scrollframe.__init__",
+                "widgets.tkmarktext.demo",
+                "widgets.tooltip.demo",
+                "utils.string_helper"
             ],
-            "default": "buttonmenu.__init__"
+            "default": "widgets.buttonmenu.__init__"
         }
     ]
 }
