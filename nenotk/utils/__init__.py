@@ -12,7 +12,9 @@ __all__ = [
     "bind_undo_stack",
 
     "string_helper",
-    "format_number_with_commas",
+    "number_commas",
+    "time_convert",
+    "format_time",
 
     "window_helper",
     "center_window",

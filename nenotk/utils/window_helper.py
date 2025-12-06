@@ -6,7 +6,7 @@ from typing import Literal
 
 __all__ = [
     "center_window",
-    ]
+]
 
 
 def center_window(window: tk.Misc, to: Literal['screen', 'parent'] = 'screen') -> None:
