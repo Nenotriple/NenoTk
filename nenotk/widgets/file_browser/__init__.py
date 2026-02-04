@@ -880,14 +880,14 @@ class FileBrowser(ttk.Frame):
 
     @staticmethod
     def _natural_sort_key(name: str):
-        """Return a tuple key that sorts numeric parts numerically and text parts case-insensitively."""
+        """Return a tuple key that sorts numeric parts numerically and text parts case-insensitively, with type tags to avoid TypeError."""
         parts = re.findall(r'\d+|\D+', name.lower())
         key = []
         for part in parts:
             if part.isdigit():
-                key.append(int(part))
+                key.append((0, int(part)))
             else:
-                key.append(part)
+                key.append((1, part))
         return tuple(key)
 
 
