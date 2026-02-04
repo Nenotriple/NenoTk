@@ -73,6 +73,9 @@ class FileBrowser(ttk.Frame):
                  on_change: Optional[Callable[[], None]] = None,
                  show_cols: Optional[List[str]] = None,
                  name_map: Optional[dict[os.PathLike[str] | str, str]] = None,
+                 show_filter_close_button: bool = True,
+                 bind_search_keys: bool = True,
+                 allow_user_toggle_search: bool = True,
                  **kwargs) -> None:
         """Initialize the file browser widget."""
         super().__init__(master, **kwargs)
@@ -82,6 +85,10 @@ class FileBrowser(ttk.Frame):
         self._placeholder_tag = "__placeholder__"
         self._name_map: dict[pathlib.Path, str] = {}
         self._icon_images = self._load_icons()
+        self._search_visible = False
+        self._search_var = tk.StringVar()
+        self._filter_enabled_var = tk.BooleanVar(value=True)
+        self._filter_status_var = tk.StringVar(value="")
 
         # Clipboard state
         self._clipboard_paths: List[pathlib.Path] = []
@@ -89,7 +96,12 @@ class FileBrowser(ttk.Frame):
         self._cut_items: set[str] = set()  # Track visually dimmed items
 
         self._set_name_map(name_map)
+        self._show_filter_close_button = show_filter_close_button
+        self._bind_search_keys_flag = bind_search_keys
+        self._allow_user_toggle_search = allow_user_toggle_search
         self._build_ui(show_cols)
+        if self._bind_search_keys_flag:
+            self._bind_search_keys()
         self.change_directory(path or pathlib.Path.home())
 
 
@@ -140,6 +152,8 @@ class FileBrowser(ttk.Frame):
         self._expand_node(root_node)
         # Restore expansion state
         self.set_expansion_state(expansion_state)
+        if self._search_var.get().strip():
+            self._apply_filter()
         self._trigger_change_callback()
 
 
@@ -161,6 +175,8 @@ class FileBrowser(ttk.Frame):
             self.refresh()
         else:
             self._update_visible_labels()
+            if self._search_var.get().strip():
+                self._apply_filter()
 
 
     def _update_visible_labels(self) -> None:
@@ -211,6 +227,46 @@ class FileBrowser(ttk.Frame):
             expand_matching(item_id)
 
 
+    def show_search(self) -> None:
+        """Show and focus the search bar."""
+        if self._search_visible:
+            self._search_entry.focus_set()
+            self._search_entry.selection_range(0, tk.END)
+            return
+        self._search_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=(6, 2))
+        self._search_visible = True
+        self._search_entry.focus_set()
+        self._search_entry.selection_range(0, tk.END)
+
+
+    def hide_search(self, *, clear: bool = False) -> None:
+        """Hide the search bar; optionally clear the filter."""
+        if not self._search_visible:
+            return
+        self._search_frame.grid_remove()
+        self._search_visible = False
+        if clear:
+            self._search_var.set("")
+
+
+    def toggle_search(self) -> None:
+        """Toggle the search bar visibility."""
+        if self._search_visible:
+            self.hide_search(clear=True)
+        else:
+            self.show_search()
+
+
+    def set_search_text(self, text: str) -> None:
+        """Programmatically set the current search text."""
+        self._search_var.set(text)
+
+
+    def get_search_text(self) -> str:
+        """Return the current search text."""
+        return self._search_var.get()
+
+
 #endregion
 #region UI Setup
 
@@ -219,7 +275,32 @@ class FileBrowser(ttk.Frame):
         """Create child widgets and configure layout."""
         self.set_visible_columns(show_cols)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+
+        self._search_frame = ttk.Frame(self)
+        self._search_frame.columnconfigure(1, weight=1)
+        self._filter_label = ttk.Label(self._search_frame, text="Filter")
+        self._search_entry = ttk.Entry(self._search_frame, textvariable=self._search_var)
+        self._filter_toggle = ttk.Checkbutton(
+            self._search_frame,
+            text="Toggle Filter",
+            variable=self._filter_enabled_var,
+            command=self._apply_filter,
+        )
+        self._filter_status_label = ttk.Label(self._search_frame, textvariable=self._filter_status_var)
+
+        self._filter_close_button = ttk.Button(self._search_frame, text="Close", command=self._close_filter_bar)
+
+        self._filter_label.grid(row=0, column=0, padx=(0, 6), sticky="w")
+        self._search_entry.grid(row=0, column=1, sticky="ew")
+        self._filter_toggle.grid(row=0, column=2, padx=(8, 0), sticky="w")
+        self._filter_status_label.grid(row=0, column=3, padx=(8, 0), sticky="w")
+        if self._show_filter_close_button:
+            self._filter_close_button.grid(row=0, column=4, padx=(8, 0), sticky="e")
+
+        self._search_frame.grid_remove()
+        self._search_var.trace_add("write", self._on_search_text_changed)
+        self._filter_enabled_var.trace_add("write", self._on_filter_toggle_changed)
 
         all_columns = ("type", "size", "modified")
         self.tree = ttk.Treeview(self, columns=all_columns, displaycolumns=self._visible_cols, show="tree headings", selectmode="extended")
@@ -236,19 +317,20 @@ class FileBrowser(ttk.Frame):
         # Configure tag for cut items
         self.tree.tag_configure("cut", foreground="gray")
 
-        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.grid(row=1, column=0, sticky="nsew")
 
         vscroll = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         hscroll = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
 
-        vscroll.grid(row=0, column=1, sticky="ns")
-        hscroll.grid(row=1, column=0, sticky="ew")
+        vscroll.grid(row=1, column=1, sticky="ns")
+        hscroll.grid(row=2, column=0, sticky="ew")
 
         self.tree.bind("<<TreeviewOpen>>", self._on_node_open, add="+")
         self.tree.bind("<Double-1>", self._on_item_activated, add="+")
         self.tree.bind("<Return>", self._on_item_activated, add="+")
         self.tree.bind("<Button-3>", self._on_right_click, add="+")
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_selection_changed, add="+")
 
         # Context menu
         self._menu = tk.Menu(self, tearoff=0)
@@ -295,6 +377,12 @@ class FileBrowser(ttk.Frame):
         self._expand_node(item_id)
 
 
+    def _on_tree_selection_changed(self, _event: tk.Event) -> None:
+        """Re-apply filter when selection changes and a search is active."""
+        if self._search_visible or self._search_var.get().strip():
+            self._apply_filter()
+
+
     def _on_item_activated(self, _event: tk.Event) -> None:
         """Handle file activation via double-click or Return key press."""
         selection = self.tree.selection()
@@ -306,6 +394,146 @@ class FileBrowser(ttk.Frame):
             return
         # Open file/folder with the OS default handler
         self._open_with_os(path)
+
+
+    def _bind_search_keys(self) -> None:
+        """Bind Ctrl+F and Esc to show/hide the search bar, if allowed."""
+        if not self._allow_user_toggle_search:
+            return
+        self.bind("<Control-f>", self._handle_ctrl_f, add="+")
+        self.bind("<Escape>", self._handle_escape, add="+")
+        self.tree.bind("<Control-f>", self._handle_ctrl_f, add="+")
+        self.tree.bind("<Escape>", self._handle_escape, add="+")
+        self._search_entry.bind("<Control-f>", self._handle_ctrl_f, add="+")
+        self._search_entry.bind("<Escape>", self._handle_escape, add="+")
+
+
+    def _handle_ctrl_f(self, _event: tk.Event) -> str:
+        """Toggle search bar on Ctrl+F, if allowed."""
+        if self._allow_user_toggle_search:
+            self.toggle_search()
+        return "break"
+
+
+    def _handle_escape(self, event: tk.Event) -> Optional[str]:
+        """Hide the search bar on Esc when visible and allowed."""
+        if not self._search_visible or not self._allow_user_toggle_search:
+            return None
+        widget = getattr(event, "widget", None)
+        if isinstance(widget, ttk.Entry) and widget is not self._search_entry:
+            return None
+        self.hide_search(clear=True)
+        return "break"
+
+
+    def _on_search_text_changed(self, *_args) -> None:
+        """Apply filter when the search text changes."""
+        self._apply_filter()
+
+
+    def _on_filter_toggle_changed(self, *_args) -> None:
+        """Apply filter when enabled/disabled changes."""
+        self._apply_filter()
+
+
+    def _close_filter_bar(self) -> None:
+        """Clear filter and hide the search bar."""
+        self.hide_search(clear=True)
+
+
+    def _apply_filter(self) -> None:
+        """Filter immediate children of the selected directory (non-recursive)."""
+        filter_text = self._search_var.get().strip().lower()
+        if not self._filter_enabled_var.get():
+            filter_text = ""
+        parent_item_id, parent_path = self._get_filter_target()
+        if parent_item_id is None or parent_path is None:
+            return
+
+        self.tree.item(parent_item_id, open=True)
+        self._expand_node(parent_item_id)
+
+        expansion_state = self.get_expansion_state()
+        cut_paths = set(self._clipboard_paths) if self._clipboard_mode == "cut" else set()
+
+        self._clear_children(parent_item_id)
+
+        child_paths = list(self._iter_directory(parent_path))
+        total_count = len(child_paths)
+        if filter_text:
+            child_paths = [
+                p for p in child_paths
+                if filter_text in self._node_label_with_map(p).lower()
+            ]
+        filtered_count = len(child_paths)
+
+        for child_path in child_paths:
+            child_id = self._insert_node(parent_item_id, child_path)
+            if child_path in cut_paths:
+                current_tags = list(self.tree.item(child_id, "tags"))
+                if "cut" not in current_tags:
+                    current_tags.append("cut")
+                    self.tree.item(child_id, tags=current_tags)
+                    self._cut_items.add(child_id)
+
+        self.set_expansion_state(expansion_state)
+        self._update_filter_status(filter_text, filtered_count, total_count)
+
+
+    def _update_filter_status(self, filter_text: str, filtered_count: int, total_count: int) -> None:
+        """Update status label with filter state and counts."""
+        if not self._filter_enabled_var.get():
+            self._filter_status_var.set("Filter off")
+            return
+        if not filter_text:
+            self._filter_status_var.set(f"{total_count} items")
+            return
+        self._filter_status_var.set(f"{filtered_count}/{total_count}")
+
+
+    def _get_filter_target(self) -> tuple[Optional[str], Optional[pathlib.Path]]:
+        """Return the tree item id and path to filter against."""
+        selection = self.tree.selection()
+        if selection:
+            item_id = selection[0]
+            path = self._node_paths.get(item_id)
+            if path is not None:
+                if path.is_dir():
+                    return item_id, path
+                parent_path = path.parent
+                parent_item_id = self._get_item_id_for_path(parent_path)
+                return parent_item_id, parent_path
+        return self._get_item_id_for_path(self._root_path), self._root_path
+
+
+    def _get_item_id_for_path(self, path: pathlib.Path) -> Optional[str]:
+        """Find the tree item id for a given path, if present."""
+        for item_id, item_path in self._node_paths.items():
+            if item_path == path:
+                return item_id
+        return None
+
+
+    def _clear_children(self, parent_item_id: str) -> None:
+        """Delete all child nodes under a parent and remove their path mappings."""
+        for child_id in list(self.tree.get_children(parent_item_id)):
+            self._clear_subtree(child_id)
+            try:
+                self.tree.delete(child_id)
+            except tk.TclError:
+                pass
+
+
+    def _clear_subtree(self, item_id: str) -> None:
+        """Clear a subtree from the Treeview and internal mappings."""
+        for child_id in list(self.tree.get_children(item_id)):
+            self._clear_subtree(child_id)
+            try:
+                self.tree.delete(child_id)
+            except tk.TclError:
+                pass
+        self._node_paths.pop(item_id, None)
+        self._cut_items.discard(item_id)
 
 
     def _set_menu_item_states(self, enabled: bool) -> None:
@@ -885,9 +1113,9 @@ class FileBrowser(ttk.Frame):
         key = []
         for part in parts:
             if part.isdigit():
-                key.append((0, int(part)))
+                key.append((0, int(part)))  # Tag numbers with 0
             else:
-                key.append((1, part))
+                key.append((1, part))      # Tag strings with 1
         return tuple(key)
 
 
