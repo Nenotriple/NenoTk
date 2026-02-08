@@ -90,6 +90,11 @@ class FileBrowser(ttk.Frame):
         self._filter_enabled_var = tk.BooleanVar(value=True)
         self._filter_status_var = tk.StringVar(value="")
 
+        # Track filter transitions so we can collapse nodes while filtering
+        # and restore the previous expansion state when the filter is cleared.
+        self._last_filter_text: str = ""
+        self._saved_expansion_state: Optional[set[pathlib.Path]] = None
+
         # Clipboard state
         self._clipboard_paths: List[pathlib.Path] = []
         self._clipboard_mode: Optional[str] = None  # 'cut' or 'copy'
@@ -383,16 +388,20 @@ class FileBrowser(ttk.Frame):
             self._apply_filter()
 
 
-    def _on_item_activated(self, _event: tk.Event) -> None:
+    def _on_item_activated(self, event: tk.Event) -> None:
         """Handle file activation via double-click or Return key press."""
+        if event is not None:
+            region = self.tree.identify_region(event.x, event.y)
+            if region == "indicator":
+                return
         selection = self.tree.selection()
         if not selection:
             return
         item_id = selection[0]
         path = self._node_paths.get(item_id)
-        if path is None:
+        if path is None or path.is_dir():
             return
-        # Open file/folder with the OS default handler
+        # Open file with the OS default handler
         self._open_with_os(path)
 
 
@@ -443,19 +452,33 @@ class FileBrowser(ttk.Frame):
 
     def _apply_filter(self) -> None:
         """Filter immediate children of the selected directory (non-recursive)."""
-        filter_text = self._search_var.get().strip().lower()
-        if not self._filter_enabled_var.get():
-            filter_text = ""
+        # Current and previous filter text (normalized)
+        raw_text = self._search_var.get()
+        filter_text = raw_text.strip().lower()
+        filter_enabled = self._filter_enabled_var.get()
         parent_item_id, parent_path = self._get_filter_target()
         if parent_item_id is None or parent_path is None:
             return
 
-        self.tree.item(parent_item_id, open=True)
-        self._expand_node(parent_item_id)
+        if not filter_enabled:
+            filter_text = ""
 
+        # Determine transition from previous filter state to current
+        prev_text = (self._last_filter_text or "").strip().lower()
+
+        # Save current expansion state before we modify the tree when starting a filter
         expansion_state = self.get_expansion_state()
+        if prev_text == "" and filter_text != "":
+            # User started filtering: save pre-filter expansion state
+            self._saved_expansion_state = expansion_state
+
+        # If a filter is active, ensure the parent is open so results are visible
+        if filter_text:
+            self.tree.item(parent_item_id, open=True)
+
         cut_paths = set(self._clipboard_paths) if self._clipboard_mode == "cut" else set()
 
+        # Rebuild the immediate children for the filter target
         self._clear_children(parent_item_id)
 
         child_paths = list(self._iter_directory(parent_path))
@@ -476,8 +499,32 @@ class FileBrowser(ttk.Frame):
                     self.tree.item(child_id, tags=current_tags)
                     self._cut_items.add(child_id)
 
-        self.set_expansion_state(expansion_state)
+        # If the filter is active, keep the tree collapsed for a focused result view.
+        # If the filter was just cleared, restore the saved pre-filter expansion state.
+        if filter_text:
+            # Collapse all children under the filter target to reduce visual clutter
+            try:
+                self._collapse_subtree(parent_item_id)
+            except Exception:
+                pass
+        else:
+            # No filter text: restore saved expansion state if we have one, otherwise restore
+            # the expansion state captured at the start of this call.
+            if self._saved_expansion_state is not None:
+                try:
+                    self.set_expansion_state(self._saved_expansion_state)
+                except Exception:
+                    pass
+                self._saved_expansion_state = None
+            else:
+                try:
+                    self.set_expansion_state(expansion_state)
+                except Exception:
+                    pass
+
+        # Update UI status and track last filter text
         self._update_filter_status(filter_text, filtered_count, total_count)
+        self._last_filter_text = raw_text
 
 
     def _update_filter_status(self, filter_text: str, filtered_count: int, total_count: int) -> None:
@@ -987,6 +1034,26 @@ class FileBrowser(ttk.Frame):
                 return
             for child_path in self._iter_directory(path):
                 self._insert_node(item_id, child_path)
+
+
+    def _collapse_subtree(self, root_item_id: Optional[str] = None) -> None:
+        """Recursively collapse all children under the given root item.
+
+        If `root_item_id` is None collapse all top-level items.
+        The root itself is not collapsed so callers can keep the parent visible.
+        """
+        if root_item_id is None:
+            for top in list(self.tree.get_children()):
+                self._collapse_subtree(top)
+            return
+
+        for child in list(self.tree.get_children(root_item_id)):
+            try:
+                self.tree.item(child, open=False)
+            except tk.TclError:
+                pass
+            # Recurse into grandchildren
+            self._collapse_subtree(child)
 
 
     def _iter_directory(self, path: pathlib.Path) -> Iterable[pathlib.Path]:
