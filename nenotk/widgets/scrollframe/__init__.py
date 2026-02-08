@@ -49,20 +49,20 @@ class _BaseScrollFrame:
             to create/bind. This name matches the internal attribute
             ``self.layout`` and the validator method.
     """
-    def __init__(self, master, layout="vertical", *args, **kwargs):
+    def __init__(self, master: tk.Widget, layout: str = "vertical", *args: object, **kwargs: object) -> None:
         self.layout = self._validate_layout(layout)
         self._setup_scroll_canvas(master)
         self._bind_mousewheel_events()
 
 
-    def _validate_layout(self, layout):
+    def _validate_layout(self, layout: str) -> str:
         """Ensure layout is 'vertical', 'horizontal', or 'both'."""
         if layout not in ("vertical", "horizontal", "both"):
             raise ValueError("layout must be 'vertical', 'horizontal', or 'both'")
         return layout
 
 
-    def _setup_scroll_canvas(self, master):
+    def _setup_scroll_canvas(self, master: tk.Widget) -> None:
         """Create Canvas and a Frame window for content, bind config events."""
         self.canvas = tk.Canvas(master, highlightthickness=0)
         self._setup_scrollbars(master)
@@ -74,7 +74,7 @@ class _BaseScrollFrame:
         self.canvas.bind("<Configure>", self._on_canvas_configure)
 
 
-    def _setup_scrollbars(self, master):
+    def _setup_scrollbars(self, master: tk.Widget) -> None:
         """Create vertical and/or horizontal ttk.Scrollbar widgets as requested."""
         if self.layout in ("vertical", "both"):
             self.vsb = ttk.Scrollbar(master, orient="vertical", command=self.canvas.yview)
@@ -86,7 +86,7 @@ class _BaseScrollFrame:
             self.hsb.pack(side="bottom", fill="x")
 
 
-    def _bind_mousewheel_events(self):
+    def _bind_mousewheel_events(self) -> None:
         """Bind enter/leave handlers; actual wheel sequences are bound dynamically."""
         # Only bind enter/leave handlers here. Actual mousewheel sequences
         # are bound/unbound dynamically in _on_enter/_on_leave based on
@@ -101,7 +101,7 @@ class _BaseScrollFrame:
 #region Events
 
 
-    def _on_frame_configure(self, _event):
+    def _on_frame_configure(self, _event: tk.Event) -> None:
         """Update canvas scrollregion and scrollable state."""
         # Always update scrollregion to the full bounding box of the content
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -109,7 +109,7 @@ class _BaseScrollFrame:
         self._update_scrollable_state()
 
 
-    def _on_canvas_configure(self, event):
+    def _on_canvas_configure(self, event: tk.Event) -> None:
         """Adjust embedded window size for single-axis layouts and update state."""
         # Only set width/height if the corresponding scrollbar is NOT present
         # This allows the content to expand beyond the visible area and be scrollable
@@ -123,7 +123,7 @@ class _BaseScrollFrame:
 
 
 
-    def _on_enter(self, _event):
+    def _on_enter(self, _event: tk.Event) -> None:
         """Recompute scrollable state and bind wheel sequences for available axes."""
         # Recompute scrollable state to make an informed decision.
         try:
@@ -151,7 +151,7 @@ class _BaseScrollFrame:
                 pass
 
 
-    def _on_leave(self, _event):
+    def _on_leave(self, _event: tk.Event) -> None:
         """Unbind wheel sequences when pointer leaves."""
         # Unbind both sequences when leaving to avoid capturing wheel events when not over widget
         for seq in ("<MouseWheel>", "<Shift-MouseWheel>"):
@@ -161,24 +161,31 @@ class _BaseScrollFrame:
                 pass
 
 
-    def _on_mousewheel(self, event):
+    def _on_mousewheel(self, event: tk.Event) -> str | None:
         """Map mousewheel to xview/yview; returns 'break' when handled."""
         if not self._event_targets_self(event.widget):
             return
         units = self._get_scroll_units(event)
         # Keep original shift-detection for compatibility; Shift-MouseWheel may also set state.
         is_shift = bool(getattr(event, "state", 0) & 0x1)
+        # If the event originates from a child widget that itself supports
+        # scrolling on the requested axis and is currently scrollable, do
+        # not intercept the event so the child receives it.
         if is_shift:
             if self.layout in ("horizontal", "both") and self._scrollable_state.get("horizontal", False):
+                if self._is_child_widget_scrollable(event.widget, "horizontal"):
+                    return
                 self.canvas.xview_scroll(units, "units")
                 return "break"
         else:
             if self.layout in ("vertical", "both") and self._scrollable_state.get("vertical", False):
+                if self._is_child_widget_scrollable(event.widget, "vertical"):
+                    return
                 self.canvas.yview_scroll(units, "units")
                 return "break"
 
 
-    def _event_targets_self(self, widget):
+    def _event_targets_self(self, widget: tk.Widget) -> bool:
         """Return True if widget is the canvas or a descendant."""
         while widget:
             if widget == self.canvas:
@@ -187,12 +194,37 @@ class _BaseScrollFrame:
         return False
 
 
+    def _is_child_widget_scrollable(self, widget: tk.Widget, axis: str) -> bool:
+        """Return True if a widget (or one of its ancestors up to the content
+        frame) has a scroll view (`yview`/`xview`) that is currently scrollable.
+
+        This prevents the ScrollFrame from stealing wheel events when an inner
+        widget (e.g., `Text`, `Treeview`, inner `Canvas`) can handle them.
+        """
+        w = widget
+        # Walk up the widget hierarchy until we reach the content frame or canvas.
+        while w and w is not self.content_frame and w is not self.canvas:
+            view = getattr(w, "yview" if axis == "vertical" else "xview", None)
+            if callable(view):
+                try:
+                    first, last = view()
+                    # If the child view does not show the whole range, it's scrollable.
+                    if not (abs(first - 0.0) < 1e-9 and abs(last - 1.0) < 1e-9):
+                        return True
+                except Exception:
+                    # If we can't reliably query the widget, be conservative and
+                    # assume it can handle the event so we don't steal it.
+                    return True
+            w = getattr(w, "master", None)
+        return False
+
+
 #endregion
 #region Helpers
 
 
     @staticmethod
-    def _get_scroll_units(event):
+    def _get_scroll_units(event: tk.Event) -> int:
         """Turn event.delta into integer scroll units."""
         delta = getattr(event, "delta", 0)
         if delta:
@@ -204,7 +236,7 @@ class _BaseScrollFrame:
         return 0
 
 
-    def _update_scrollable_state(self):
+    def _update_scrollable_state(self) -> None:
         """Recompute cached scrollable state and emit <<ScrollStateChanged>> if changed."""
         prev = getattr(self, "_scrollable_state", None)
         v = self._is_axis_scrollable("vertical")
@@ -217,7 +249,7 @@ class _BaseScrollFrame:
                 pass
 
 
-    def _is_axis_scrollable(self, axis):
+    def _is_axis_scrollable(self, axis: str) -> bool:
         """Return True if the content is larger than the canvas view on the axis."""
         try:
             if axis == "vertical":
@@ -242,7 +274,7 @@ class ScrollFrame(ttk.Frame, _BaseScrollFrame):
     Use layout='vertical'|'horizontal'|'both'. Pass label to wrap
     content in a ttk.LabelFrame.
     """
-    def __init__(self, master, layout="vertical", label=None, *args, **kwargs):
+    def __init__(self, master: tk.Widget, layout: str = "vertical", label: str | None = None, *args: object, **kwargs: object) -> None:
         """Initialize the ScrollFrame container."""
         # Initialize the outer frame (this instance) which remains the widget to pack/grid.
         ttk.Frame.__init__(self, master, *args, **kwargs)
