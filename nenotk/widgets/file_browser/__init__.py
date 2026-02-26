@@ -384,7 +384,16 @@ class FileBrowser(ttk.Frame):
 
     def _on_tree_selection_changed(self, _event: tk.Event) -> None:
         """Re-apply filter when selection changes and a search is active."""
-        if self._search_visible or self._search_var.get().strip():
+        # Only re-apply when there is active filter text and a directory is selected.
+        # Rebuilding for file selections clears the current selection and makes files
+        # difficult/impossible to select while filtering.
+        if not (self._filter_enabled_var.get() and self._search_var.get().strip()):
+            return
+        selection = self.tree.selection()
+        if not selection:
+            return
+        selected_path = self._node_paths.get(selection[0])
+        if selected_path is not None and selected_path.is_dir():
             self._apply_filter()
 
 
