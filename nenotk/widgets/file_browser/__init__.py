@@ -189,7 +189,10 @@ class FileBrowser(ttk.Frame):
         for item_id, path in self._node_paths.items():
             new_label = self._node_label_with_map(path)
             icon = self._get_icon_for_path(path)
-            self.tree.item(item_id, text=new_label, image=icon)
+            if icon is None:
+                self.tree.item(item_id, text=new_label, image="")
+            else:
+                self.tree.item(item_id, text=new_label, image=icon)
 
 
     def get_expansion_state(self) -> set[pathlib.Path]:
@@ -1025,7 +1028,10 @@ class FileBrowser(ttk.Frame):
         text = self._node_label_with_map(path)
         values = self._describe_path(path)
         icon = self._get_icon_for_path(path)
-        item_id = self.tree.insert(parent, "end", text=text, values=values, open=open, image=icon)
+        if icon is None:
+            item_id = self.tree.insert(parent, "end", text=text, values=values, open=open)
+        else:
+            item_id = self.tree.insert(parent, "end", text=text, values=values, open=open, image=icon)
         self._node_paths[item_id] = path
         if path.is_dir():
             # Insert a placeholder child so the Treeview displays an expand icon.
