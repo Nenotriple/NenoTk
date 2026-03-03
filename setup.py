@@ -6,7 +6,7 @@ def parse_requirements(filename):
 
 setup(
     name="nenotk",
-    version="0.1.1",
+    version="0.1.2",
     description="A collection of custom Tkinter widgets and utilities for Python 3.10+.",
     author="Nenotriple",
     url="https://github.com/Nenotriple/NenoTk",

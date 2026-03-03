@@ -9,7 +9,7 @@ Designed to be simple to implement, blend in with existing ttk styles, extend fu
 
 ## Installation
 
-Tested on Python 3.10
+Tested on Python 3.10.x - 3.11.x
 
 ### Pip
 
