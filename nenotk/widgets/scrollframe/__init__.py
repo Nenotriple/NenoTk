@@ -3,11 +3,13 @@
 Provides a scrollable frame widget for Tkinter GUIs, supporting vertical, horizontal, or both scrollbars.
 
 ## API
-- Class: `ScrollFrame(master, layout="vertical", label=None, ...) -> ttk.Frame`
+- Class: `ScrollFrame(master, layout="vertical", label=None, maxwidth=None, ...) -> ttk.Frame`
     - `master`: parent widget
     - `layout`: 'vertical', 'horizontal', or 'both' (controls which scrollbars are shown)
     - `label`: optional string; if provided, wraps content in a ttk.LabelFrame
+    - `maxwidth`: optional integer cap for vertical layout width sync
     - `.frame`: attribute; the inner frame for user content
+    - `.set_maxwidth(maxwidth)`: update the vertical width cap at runtime
     - `Returns`: ScrollFrame instance
 
 ## Notes
@@ -49,8 +51,9 @@ class _BaseScrollFrame:
             to create/bind. This name matches the internal attribute
             ``self.layout`` and the validator method.
     """
-    def __init__(self, master: tk.Widget, layout: str = "vertical", *args: object, **kwargs: object) -> None:
+    def __init__(self, master: tk.Widget, layout: str = "vertical", maxwidth: int | None = None, *args: object, **kwargs: object) -> None:
         self.layout = self._validate_layout(layout)
+        self._maxwidth = self._validate_maxwidth(maxwidth)
         self._width_sync_job: str | None = None
         self._wheel_bindtag = f"ScrollFrameMouseWheel{hex(id(self))}"
         self._wheel_cooldown_ms = 250
@@ -65,6 +68,20 @@ class _BaseScrollFrame:
         if layout not in ("vertical", "horizontal", "both"):
             raise ValueError("layout must be 'vertical', 'horizontal', or 'both'")
         return layout
+
+
+    @staticmethod
+    def _validate_maxwidth(maxwidth: int | None) -> int | None:
+        """Normalize an optional width cap for vertical layouts."""
+        if maxwidth is None:
+            return None
+        try:
+            value = int(maxwidth)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("maxwidth must be a positive integer or None") from exc
+        if value <= 0:
+            raise ValueError("maxwidth must be a positive integer or None")
+        return value
 
 
     def _setup_scroll_canvas(self, master: tk.Widget) -> None:
@@ -343,8 +360,17 @@ class _BaseScrollFrame:
             current_request = int(float(self.canvas.cget("width")))
         except Exception:
             return
+        if self._maxwidth is not None:
+            required_width = min(required_width, self._maxwidth)
         if required_width > 1 and current_request != required_width:
             self.canvas.configure(width=required_width)
+
+
+    def set_maxwidth(self, maxwidth: int | None) -> None:
+        """Set or clear the width cap used by vertical width synchronization."""
+        self._maxwidth = self._validate_maxwidth(maxwidth)
+        if self.layout == "vertical":
+            self._schedule_width_sync()
 
 
     def _update_scrollable_state(self) -> None:
@@ -385,7 +411,7 @@ class ScrollFrame(ttk.Frame, _BaseScrollFrame):
     Use layout='vertical'|'horizontal'|'both'. Pass label to wrap
     content in a ttk.LabelFrame.
     """
-    def __init__(self, master: tk.Widget, layout: str = "vertical", label: str | None = None, *args: object, **kwargs: object) -> None:
+    def __init__(self, master: tk.Widget, layout: str = "vertical", label: str | None = None, maxwidth: int | None = None, *args: object, **kwargs: object) -> None:
         """Initialize the ScrollFrame container."""
         # Initialize the outer frame (this instance) which remains the widget to pack/grid.
         ttk.Frame.__init__(self, master, *args, **kwargs)
@@ -397,7 +423,7 @@ class ScrollFrame(ttk.Frame, _BaseScrollFrame):
             self._inner_container = None
             base_parent = self
         # Initialize the scrollable machinery using the chosen container as the master.
-        _BaseScrollFrame.__init__(self, base_parent, layout, *args, **kwargs)
+        _BaseScrollFrame.__init__(self, base_parent, layout, maxwidth, *args, **kwargs)
 
 
 #endregion

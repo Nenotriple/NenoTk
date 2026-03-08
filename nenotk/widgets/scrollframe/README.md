@@ -32,12 +32,15 @@ root.mainloop()
 
 ## API
 
-- Class: `ScrollFrame(master, layout="vertical", label=None, **kwargs)`
+- Class: `ScrollFrame(master, layout="vertical", label=None, maxwidth=None, **kwargs)`
   - `layout`: `"vertical"`, `"horizontal"`, or `"both"`
   - `label`: optional string; wraps content in a `ttk.LabelFrame`
+  - `maxwidth`: optional positive integer used only when `layout="vertical"`; caps the canvas width during automatic sync to the widest child
   - Inherits `ttk.Frame` options via `**kwargs`
 - Attributes
   - `.frame`: the inner `ttk.Frame` to pack/grid/place your widgets
+- Methods
+  - `.set_maxwidth(maxwidth)` – change the optional width cap at runtime; use `None` to clear it
 - Events
   - `<<ScrollStateChanged>>` fired when scrollability toggles on/off per axis
 
