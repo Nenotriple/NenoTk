@@ -51,6 +51,7 @@ class _BaseScrollFrame:
     """
     def __init__(self, master: tk.Widget, layout: str = "vertical", *args: object, **kwargs: object) -> None:
         self.layout = self._validate_layout(layout)
+        self._width_sync_job: str | None = None
         self._setup_scroll_canvas(master)
         self._bind_mousewheel_events()
 
@@ -105,6 +106,7 @@ class _BaseScrollFrame:
         """Update canvas scrollregion and scrollable state."""
         # Always update scrollregion to the full bounding box of the content
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._schedule_width_sync()
         # update cached scrollable state after content changes
         self._update_scrollable_state()
 
@@ -234,6 +236,27 @@ class _BaseScrollFrame:
                 magnitude = 1
             return -int(delta / abs(delta)) * magnitude
         return 0
+
+
+    def _schedule_width_sync(self) -> None:
+        """Keep vertical layouts wide enough for their content without x-scrolling."""
+        if self.layout != "vertical" or self._width_sync_job is not None:
+            return
+        self._width_sync_job = self.canvas.after_idle(self._sync_vertical_width)
+
+
+    def _sync_vertical_width(self) -> None:
+        """Update the canvas requested width to the content's requested width."""
+        self._width_sync_job = None
+        if self.layout != "vertical":
+            return
+        try:
+            required_width = self.content_frame.winfo_reqwidth()
+            current_request = int(float(self.canvas.cget("width")))
+        except Exception:
+            return
+        if required_width > 1 and current_request != required_width:
+            self.canvas.configure(width=required_width)
 
 
     def _update_scrollable_state(self) -> None:
