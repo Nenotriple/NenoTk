@@ -41,13 +41,14 @@ import shutil
 import pathlib
 import subprocess
 
-# tkinter
+# Tkinter
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-# typing
+# Typing
 from typing import Callable, Iterable, List, Optional
 
+# Third-party
 from PIL import Image, ImageTk
 
 
@@ -57,7 +58,6 @@ from PIL import Image, ImageTk
 
 class FileBrowser(ttk.Frame):
     """Treeview-backed browser for navigating the filesystem."""
-
     # Filename validation constants (Windows-specific)
     INVALID_FILENAME_CHARS = '<>:"/\\|?*'
     RESERVED_FILENAMES = frozenset({
@@ -65,6 +65,7 @@ class FileBrowser(ttk.Frame):
         'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
         'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
     })
+
 
     def __init__(self,
                  master: tk.Widget,
@@ -82,6 +83,9 @@ class FileBrowser(ttk.Frame):
         self.on_open = on_open
         self.on_change = on_change
         self._node_paths: dict[str, pathlib.Path] = {}
+        self._path_items: dict[pathlib.Path, str] = {}
+        self._directory_cache: dict[pathlib.Path, tuple[pathlib.Path, ...]] = {}
+        self._directory_filter_cache: dict[pathlib.Path, tuple[tuple[pathlib.Path, str], ...]] = {}
         self._placeholder_tag = "__placeholder__"
         self._name_map: dict[pathlib.Path, str] = {}
         self._icon_images = self._load_icons()
@@ -89,17 +93,20 @@ class FileBrowser(ttk.Frame):
         self._search_var = tk.StringVar()
         self._filter_enabled_var = tk.BooleanVar(value=True)
         self._filter_status_var = tk.StringVar(value="")
-
+        # Debounce state for search/filtering.
+        self._filter_job_id: Optional[str] = None
+        self._filter_debounce_ms = 100
         # Track filter transitions so we can collapse nodes while filtering
         # and restore the previous expansion state when the filter is cleared.
         self._last_filter_text: str = ""
+        self._last_filter_target_path: Optional[pathlib.Path] = None
+        self._last_filtered_entries: tuple[tuple[pathlib.Path, str], ...] = ()
+        self._last_applied_filter_signature: Optional[tuple[pathlib.Path, bool, str]] = None
         self._saved_expansion_state: Optional[set[pathlib.Path]] = None
-
         # Clipboard state
         self._clipboard_paths: List[pathlib.Path] = []
         self._clipboard_mode: Optional[str] = None  # 'cut' or 'copy'
         self._cut_items: set[str] = set()  # Track visually dimmed items
-
         self._set_name_map(name_map)
         self._show_filter_close_button = show_filter_close_button
         self._bind_search_keys_flag = bind_search_keys
@@ -152,6 +159,10 @@ class FileBrowser(ttk.Frame):
         # Save expansion state before clearing
         expansion_state = self.get_expansion_state()
         self._node_paths.clear()
+        self._path_items.clear()
+        self._directory_cache.clear()
+        self._directory_filter_cache.clear()
+        self._reset_filter_state()
         self.tree.delete(*self.tree.get_children())
         root_node = self._insert_node("", self._root_path, open=True)
         self._expand_node(root_node)
@@ -186,32 +197,25 @@ class FileBrowser(ttk.Frame):
 
     def _update_visible_labels(self) -> None:
         """Update the text labels and icons of all existing tree items based on current name map."""
+        self._directory_cache.clear()
+        self._directory_filter_cache.clear()
+        self._reset_filter_state()
         for item_id, path in self._node_paths.items():
             new_label = self._node_label_with_map(path)
-            icon = self._get_icon_for_path(path)
-            if icon is None:
-                self.tree.item(item_id, text=new_label, image="")
-            else:
-                self.tree.item(item_id, text=new_label, image=icon)
+            self.tree.item(item_id, text=new_label)
 
 
     def get_expansion_state(self) -> set[pathlib.Path]:
         """Return a set of paths for all currently expanded nodes."""
         expanded_paths = set()
-
-        def collect_expanded(item_id: str) -> None:
+        stack = list(self.tree.get_children())
+        while stack:
+            item_id = stack.pop()
             if self.tree.item(item_id, "open"):
                 path = self._node_paths.get(item_id)
                 if path is not None:
                     expanded_paths.add(path)
-            # Recurse into children
-            for child_id in self.tree.get_children(item_id):
-                collect_expanded(child_id)
-
-        # Start from root items
-        for item_id in self.tree.get_children():
-            collect_expanded(item_id)
-
+            stack.extend(self.tree.get_children(item_id))
         return expanded_paths
 
 
@@ -219,20 +223,14 @@ class FileBrowser(ttk.Frame):
         """Restore expansion state from a previously saved set of paths."""
         if not state:
             return
-
-        def expand_matching(item_id: str) -> None:
+        stack = list(self.tree.get_children())
+        while stack:
+            item_id = stack.pop()
             path = self._node_paths.get(item_id)
             if path in state:
-                # Open this node and ensure its children are loaded
                 self.tree.item(item_id, open=True)
                 self._expand_node(item_id)
-                # Recurse into children to restore their state
-                for child_id in self.tree.get_children(item_id):
-                    expand_matching(child_id)
-
-        # Start from root items
-        for item_id in self.tree.get_children():
-            expand_matching(item_id)
+                stack.extend(self.tree.get_children(item_id))
 
 
     def show_search(self) -> None:
@@ -284,62 +282,44 @@ class FileBrowser(ttk.Frame):
         self.set_visible_columns(show_cols)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
-
         self._search_frame = ttk.Frame(self)
         self._search_frame.columnconfigure(1, weight=1)
         self._filter_label = ttk.Label(self._search_frame, text="Filter")
         self._search_entry = ttk.Entry(self._search_frame, textvariable=self._search_var)
-        self._filter_toggle = ttk.Checkbutton(
-            self._search_frame,
-            text="Toggle Filter",
-            variable=self._filter_enabled_var,
-            command=self._apply_filter,
-        )
+        self._filter_toggle = ttk.Checkbutton(self._search_frame, text="Toggle Filter", variable=self._filter_enabled_var, command=self._apply_filter)
         self._filter_status_label = ttk.Label(self._search_frame, textvariable=self._filter_status_var)
-
         self._filter_close_button = ttk.Button(self._search_frame, text="Close", command=self._close_filter_bar)
-
         self._filter_label.grid(row=0, column=0, padx=(0, 6), sticky="w")
         self._search_entry.grid(row=0, column=1, sticky="ew")
         self._filter_toggle.grid(row=0, column=2, padx=(8, 0), sticky="w")
         self._filter_status_label.grid(row=0, column=3, padx=(8, 0), sticky="w")
         if self._show_filter_close_button:
             self._filter_close_button.grid(row=0, column=4, padx=(8, 0), sticky="e")
-
         self._search_frame.grid_remove()
         self._search_var.trace_add("write", self._on_search_text_changed)
         self._filter_enabled_var.trace_add("write", self._on_filter_toggle_changed)
-
         all_columns = ("type", "size", "modified")
         self.tree = ttk.Treeview(self, columns=all_columns, displaycolumns=self._visible_cols, show="tree headings", selectmode="extended")
         self.tree.heading("#0", text="Name", anchor="w")
         self.tree.heading("type", text="Type", anchor="w")
         self.tree.heading("size", text="Size", anchor="w")
         self.tree.heading("modified", text="Modified", anchor="w")
-
         self.tree.column("#0", width=240, minwidth=160, stretch=True)
         self.tree.column("type", width=120, minwidth=80, stretch=False)
         self.tree.column("size", width=100, minwidth=80, stretch=False)
         self.tree.column("modified", width=160, minwidth=140, stretch=False)
-
-        # Configure tag for cut items
         self.tree.tag_configure("cut", foreground="gray")
-
         self.tree.grid(row=1, column=0, sticky="nsew")
-
         vscroll = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         hscroll = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
-
         vscroll.grid(row=1, column=1, sticky="ns")
         hscroll.grid(row=2, column=0, sticky="ew")
-
         self.tree.bind("<<TreeviewOpen>>", self._on_node_open, add="+")
         self.tree.bind("<Double-1>", self._on_item_activated, add="+")
         self.tree.bind("<Return>", self._on_item_activated, add="+")
         self.tree.bind("<Button-3>", self._on_right_click, add="+")
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_selection_changed, add="+")
-
         # Context menu
         self._menu = tk.Menu(self, tearoff=0)
         self._menu.add_command(label="Open", command=self._menu_open)
@@ -360,7 +340,6 @@ class FileBrowser(ttk.Frame):
         self._menu.add_command(label="Refresh", command=self.refresh)
         self._menu.add_separator()
         self._menu.add_command(label="Delete", command=self._menu_delete)
-
         self._menu_item_id = None  # Track which item menu is for
 
 
@@ -397,7 +376,7 @@ class FileBrowser(ttk.Frame):
             return
         selected_path = self._node_paths.get(selection[0])
         if selected_path is not None and selected_path.is_dir():
-            self._apply_filter()
+            self._schedule_filter(delay_ms=0)
 
 
     def _on_item_activated(self, event: tk.Event) -> None:
@@ -448,12 +427,31 @@ class FileBrowser(ttk.Frame):
 
 
     def _on_search_text_changed(self, *_args) -> None:
-        """Apply filter when the search text changes."""
-        self._apply_filter()
+        """Debounce filter updates when the search text changes."""
+        self._schedule_filter()
 
 
     def _on_filter_toggle_changed(self, *_args) -> None:
-        """Apply filter when enabled/disabled changes."""
+        """Debounce filter updates when filter-enabled changes."""
+        self._schedule_filter()
+
+
+    def _schedule_filter(self, delay_ms: Optional[int] = None) -> None:
+        """Schedule `_apply_filter` with a debounce delay."""
+        if delay_ms is None:
+            delay_ms = self._filter_debounce_ms
+        if self._filter_job_id is not None:
+            try:
+                self.after_cancel(self._filter_job_id)
+            except Exception:
+                pass
+            self._filter_job_id = None
+        self._filter_job_id = self.after(delay_ms, self._run_filter_job)
+
+
+    def _run_filter_job(self) -> None:
+        """Run the scheduled filter and clear job id."""
+        self._filter_job_id = None
         self._apply_filter()
 
 
@@ -464,53 +462,64 @@ class FileBrowser(ttk.Frame):
 
     def _apply_filter(self) -> None:
         """Filter immediate children of the selected directory (non-recursive)."""
+        # If this was triggered manually while a debounce job is pending, cancel it.
+        if self._filter_job_id is not None:
+            try:
+                self.after_cancel(self._filter_job_id)
+            except Exception:
+                pass
+            self._filter_job_id = None
         # Current and previous filter text (normalized)
         raw_text = self._search_var.get()
-        filter_text = raw_text.strip().lower()
+        filter_text = raw_text.strip().casefold()
         filter_enabled = self._filter_enabled_var.get()
         parent_item_id, parent_path = self._get_filter_target()
         if parent_item_id is None or parent_path is None:
             return
-
         if not filter_enabled:
             filter_text = ""
-
+        filter_signature = (parent_path, filter_enabled, filter_text)
+        if self._last_applied_filter_signature == filter_signature:
+            total_count = len(self._get_filterable_entries(parent_path))
+            filtered_count = len(self._last_filtered_entries) if filter_text else total_count
+            if filter_text:
+                self.tree.item(parent_item_id, open=True)
+            self._update_filter_status(filter_text, filtered_count, total_count)
+            return
         # Determine transition from previous filter state to current
-        prev_text = (self._last_filter_text or "").strip().lower()
-
+        prev_text = (self._last_filter_text or "").strip().casefold()
+        prev_target_path = self._last_filter_target_path
         # Save current expansion state before we modify the tree when starting a filter
         expansion_state = self.get_expansion_state()
         if prev_text == "" and filter_text != "":
             # User started filtering: save pre-filter expansion state
             self._saved_expansion_state = expansion_state
-
         # If a filter is active, ensure the parent is open so results are visible
         if filter_text:
             self.tree.item(parent_item_id, open=True)
-
         cut_paths = set(self._clipboard_paths) if self._clipboard_mode == "cut" else set()
-
-        # Rebuild the immediate children for the filter target
-        self._clear_children(parent_item_id)
-
-        child_paths = list(self._iter_directory(parent_path))
-        total_count = len(child_paths)
+        filterable_entries = self._get_filterable_entries(parent_path)
+        total_count = len(filterable_entries)
+        source_entries = filterable_entries
         if filter_text:
-            child_paths = [
-                p for p in child_paths
-                if filter_text in self._node_label_with_map(p).lower()
-            ]
+            if parent_path == prev_target_path and prev_text and filter_text.startswith(prev_text):
+                source_entries = self._last_filtered_entries
+            filtered_entries = tuple(entry for entry in source_entries if filter_text in entry[1])
+        else:
+            filtered_entries = filterable_entries
+        child_paths = tuple(path for path, _label in filtered_entries)
         filtered_count = len(child_paths)
-
-        for child_path in child_paths:
-            child_id = self._insert_node(parent_item_id, child_path)
-            if child_path in cut_paths:
-                current_tags = list(self.tree.item(child_id, "tags"))
-                if "cut" not in current_tags:
-                    current_tags.append("cut")
-                    self.tree.item(child_id, tags=current_tags)
-                    self._cut_items.add(child_id)
-
+        current_child_paths = self._get_visible_child_paths(parent_item_id)
+        if current_child_paths != child_paths:
+            self._clear_children(parent_item_id)
+            for child_path in child_paths:
+                child_id = self._insert_node(parent_item_id, child_path)
+                if child_path in cut_paths:
+                    current_tags = list(self.tree.item(child_id, "tags"))
+                    if "cut" not in current_tags:
+                        current_tags.append("cut")
+                        self.tree.item(child_id, tags=current_tags)
+                        self._cut_items.add(child_id)
         # If the filter is active, keep the tree collapsed for a focused result view.
         # If the filter was just cleared, restore the saved pre-filter expansion state.
         if filter_text:
@@ -533,10 +542,12 @@ class FileBrowser(ttk.Frame):
                     self.set_expansion_state(expansion_state)
                 except Exception:
                     pass
-
         # Update UI status and track last filter text
         self._update_filter_status(filter_text, filtered_count, total_count)
         self._last_filter_text = raw_text
+        self._last_filter_target_path = parent_path
+        self._last_filtered_entries = filtered_entries
+        self._last_applied_filter_signature = filter_signature
 
 
     def _update_filter_status(self, filter_text: str, filtered_count: int, total_count: int) -> None:
@@ -567,10 +578,7 @@ class FileBrowser(ttk.Frame):
 
     def _get_item_id_for_path(self, path: pathlib.Path) -> Optional[str]:
         """Find the tree item id for a given path, if present."""
-        for item_id, item_path in self._node_paths.items():
-            if item_path == path:
-                return item_id
-        return None
+        return self._path_items.get(path)
 
 
     def _clear_children(self, parent_item_id: str) -> None:
@@ -591,8 +599,29 @@ class FileBrowser(ttk.Frame):
                 self.tree.delete(child_id)
             except tk.TclError:
                 pass
-        self._node_paths.pop(item_id, None)
+        path = self._node_paths.pop(item_id, None)
+        if path is not None and self._path_items.get(path) == item_id:
+            self._path_items.pop(path, None)
         self._cut_items.discard(item_id)
+
+
+    def _get_visible_child_paths(self, parent_item_id: str) -> tuple[pathlib.Path, ...]:
+        """Return the currently visible direct child paths for a tree item."""
+        paths = []
+        for child_id in self.tree.get_children(parent_item_id):
+            path = self._node_paths.get(child_id)
+            if path is not None:
+                paths.append(path)
+        return tuple(paths)
+
+
+    def _reset_filter_state(self) -> None:
+        """Clear cached filter results so the next filter pass recomputes state."""
+        self._last_filter_text = ""
+        self._last_filter_target_path = None
+        self._last_filtered_entries = ()
+        self._last_applied_filter_signature = None
+        self._saved_expansion_state = None
 
 
     def _set_menu_item_states(self, enabled: bool) -> None:
@@ -749,11 +778,7 @@ class FileBrowser(ttk.Frame):
         self.refresh()
         self.set_expansion_state(expansion_state)
         # Find the new item
-        new_item_id = None
-        for item_id, path in self._node_paths.items():
-            if path == new_path:
-                new_item_id = item_id
-                break
+        new_item_id = self._get_item_id_for_path(new_path)
         if new_item_id:
             # Select and scroll to the new item
             self.tree.selection_set(new_item_id)
@@ -1033,6 +1058,7 @@ class FileBrowser(ttk.Frame):
         else:
             item_id = self.tree.insert(parent, "end", text=text, values=values, open=open, image=icon)
         self._node_paths[item_id] = path
+        self._path_items[path] = item_id
         if path.is_dir():
             # Insert a placeholder child so the Treeview displays an expand icon.
             self.tree.insert(item_id, "end", text="", values=("", "", ""), tags=(self._placeholder_tag,))
@@ -1053,7 +1079,6 @@ class FileBrowser(ttk.Frame):
 
     def _collapse_subtree(self, root_item_id: Optional[str] = None) -> None:
         """Recursively collapse all children under the given root item.
-
         If `root_item_id` is None collapse all top-level items.
         The root itself is not collapsed so callers can keep the parent visible.
         """
@@ -1061,7 +1086,6 @@ class FileBrowser(ttk.Frame):
             for top in list(self.tree.get_children()):
                 self._collapse_subtree(top)
             return
-
         for child in list(self.tree.get_children(root_item_id)):
             try:
                 self.tree.item(child, open=False)
@@ -1073,10 +1097,14 @@ class FileBrowser(ttk.Frame):
 
     def _iter_directory(self, path: pathlib.Path) -> Iterable[pathlib.Path]:
         """Yield directory contents sorted with directories first and names in natural order or name_map."""
+        cached_entries = self._directory_cache.get(path)
+        if cached_entries is not None:
+            return cached_entries
         try:
             entries = list(path.iterdir())
         except (PermissionError, OSError):
             return []
+
         def sort_key(p):
             # Use mapped name if available, else fallback to natural sort key
             mapped = self._get_mapped_name(p)
@@ -1084,8 +1112,21 @@ class FileBrowser(ttk.Frame):
                 # Use natural sort key on mapped name for consistency
                 return (not p.is_dir(), FileBrowser._natural_sort_key(mapped.lower()))
             return (not p.is_dir(), FileBrowser._natural_sort_key(p.name))
+
         entries.sort(key=sort_key)
-        return entries
+        cached_entries = tuple(entries)
+        self._directory_cache[path] = cached_entries
+        return cached_entries
+
+
+    def _get_filterable_entries(self, path: pathlib.Path) -> tuple[tuple[pathlib.Path, str], ...]:
+        """Return cached directory entries paired with lowercase display labels for filtering."""
+        cached_entries = self._directory_filter_cache.get(path)
+        if cached_entries is not None:
+            return cached_entries
+        cached_entries = tuple((entry, self._node_label_with_map(entry).casefold()) for entry in self._iter_directory(path))
+        self._directory_filter_cache[path] = cached_entries
+        return cached_entries
 
 
 #endregion
@@ -1224,7 +1265,6 @@ if __name__ == "__main__":
 
     browser.on_open = handle_open
 
-
     # Demo with filename mapping
     # --------------------------
     current_dir = pathlib.Path(".").resolve()
@@ -1232,8 +1272,6 @@ if __name__ == "__main__":
         current_dir: "🏠 Root",
         current_dir / "setup.py": "Module Setup",
     }
-
     browser2 = FileBrowser(root, path=".", show_cols=["size"], name_map=name_mapping)
     browser2.pack(fill="both", expand=True)
-
     root.mainloop()
